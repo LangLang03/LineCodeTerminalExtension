@@ -133,11 +133,17 @@ jobs:
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "Version: $VERSION_NAME ($VERSION_CODE)"
 
+      - name: Rename release APK
+        run: |
+          apk="$(find app/build/outputs/apk/release -name '*.apk' -print -quit)"
+          test -n "$apk"
+          cp "$apk" "app/build/outputs/apk/release/LineCode Terminal Extension ${{ steps.version.outputs.version_name }}.APK"
+
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
           name: LineCode-Terminal-Extension-v${{ steps.version.outputs.version_name }}
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/*.APK
           if-no-files-found: error
           retention-days: 90
 
@@ -184,7 +190,7 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/*.APK
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
