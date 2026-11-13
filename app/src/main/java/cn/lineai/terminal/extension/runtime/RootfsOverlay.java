@@ -15,8 +15,10 @@ import java.nio.file.Paths;
 import java.util.List;
 
 /**
- * 在已解压的 Ubuntu Base 镜像上写入宿主侧 overlay：DNS、apt sandbox 配置、shell profile、
- * workspace、CA 证书，以及补足基础镜像缺失命令的静态 busybox（vi、less、wget、unzip 等）。
+ * Writes the host-side overlay onto an already extracted Ubuntu Base image:
+ * DNS with IPv4-only resolver policy, APT sandbox configuration, shell profile,
+ * the workspace directory, CA certificates, and static busybox links providing
+ * applets missing from the base image (vi, less, wget, unzip and others).
  */
 final class RootfsOverlay {
 
@@ -24,13 +26,33 @@ final class RootfsOverlay {
             "vi", "less", "wget", "nc", "unzip", "zip", "xz", "unxz", "nslookup", "telnet"
     };
 
+    /**
+     * Receives coarse-grained overlay installation progress.
+     */
     interface Progress {
+
+        /**
+         * Reports progress toward a fully configured rootfs.
+         *
+         * @param percent completion percentage between 0 and 100
+         * @param message human-readable description of the current step
+         */
         void onProgress(int percent, String message);
     }
 
+    /** Suppresses instantiation; all members are static. */
     private RootfsOverlay() {
     }
 
+    /**
+     * Applies the full overlay to a rootfs; used during installation only.
+     *
+     * @param context context supplying the bundled assets
+     * @param rootfs host directory of the extracted rootfs
+     * @param dnsServers IPv4 resolver addresses to publish
+     * @param progress optional progress listener
+     * @throws IOException when configuration files or assets cannot be written
+     */
     static void apply(Context context, File rootfs, List<String> dnsServers, Progress progress)
             throws IOException {
         report(progress, 0, "配置网络与软件源");
@@ -70,7 +92,15 @@ final class RootfsOverlay {
         report(progress, 100, "环境配置完成");
     }
 
-    /** (Re)writes the guest network configuration; safe to call for an existing rootfs. */
+    /**
+     * Rewrites the guest network configuration; safe to call for an existing
+     * rootfs without reinstalling, for example after the host network changed.
+     *
+     * @param context context supplying the bundled assets
+     * @param rootfs host directory of the extracted rootfs
+     * @param dnsServers IPv4 resolver addresses to publish
+     * @throws IOException when the configuration files cannot be written
+     */
     static void refreshNetwork(Context context, File rootfs, List<String> dnsServers)
             throws IOException {
         writeText(new File(rootfs, "etc/resolv.conf"), resolvConf(dnsServers));
@@ -78,6 +108,13 @@ final class RootfsOverlay {
         writeText(new File(rootfs, "etc/gai.conf"), GAI_CONF);
     }
 
+    /**
+     * Builds the {@code resolv.conf} content from IPv4 resolver addresses,
+     * falling back to public resolvers when none remain.
+     *
+     * @param dnsServers candidate resolver addresses
+     * @return the resolver configuration text
+     */
     static String resolvConf(List<String> dnsServers) {
         StringBuilder out = new StringBuilder();
         if (dnsServers != null) {
@@ -97,6 +134,7 @@ final class RootfsOverlay {
         return out.toString();
     }
 
+    /** Copies a bundled asset to the target path. */
     private static void copyAsset(AssetManager assets, String assetPath, File target)
             throws IOException {
         mkdirs(target.getParentFile());
@@ -110,6 +148,7 @@ final class RootfsOverlay {
         }
     }
 
+    /** Writes UTF-8 text with 0644 permissions, creating parent directories. */
     private static void writeText(File target, String content) throws IOException {
         mkdirs(target.getParentFile());
         try (OutputStream out = new FileOutputStream(target)) {
@@ -118,12 +157,14 @@ final class RootfsOverlay {
         chmod(target, 0644);
     }
 
+    /** Creates a directory, tolerating concurrent creation. */
     private static void mkdirs(File dir) throws IOException {
         if (dir != null && !dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {
             throw new IOException("Cannot create directory: " + dir);
         }
     }
 
+    /** Applies POSIX permission bits with a java.io executable-bit fallback. */
     private static void chmod(File file, int mode) {
         try {
             Path path = file.toPath();
@@ -139,6 +180,7 @@ final class RootfsOverlay {
         }
     }
 
+    /** Renders an octal mode as the nine-character POSIX permission string. */
     private static String toPosixMode(int mode) {
         StringBuilder out = new StringBuilder(9);
         out.append((mode & 0400) != 0 ? 'r' : '-');
@@ -153,6 +195,7 @@ final class RootfsOverlay {
         return out.toString();
     }
 
+    /** Invokes the listener when present. */
     private static void report(Progress progress, int percent, String message) {
         if (progress != null) {
             progress.onProgress(percent, message);

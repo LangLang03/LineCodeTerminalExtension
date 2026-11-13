@@ -15,15 +15,23 @@ import java.util.Set;
 import java.util.zip.GZIPInputStream;
 
 /**
- * 按 guest 语义解压内置 Ubuntu Base tarball：重建符号链接与硬链接、保留可执行位，
- * 并保证任何条目都无法逃逸目标目录。
- *
- * <p>Ubuntu Base 镜像为普通 ustar/GNU tar（3497 个条目，无 PAX 头）；解析器同时支持
- * GNU 长文件名与 PAX path 覆盖，以便镜像更新后仍可继续使用。</p>
+ * Extracts the embedded Ubuntu Base tarball with guest semantics: symbolic and
+ * hard links are rebuilt, executable bits are preserved, and no entry may escape
+ * the destination directory. Supports ustar and GNU tar, including GNU long
+ * names and PAX path overrides, so updated images remain usable.
  */
 public final class TarGzExtractor {
 
+    /** Extraction progress callback. */
     public interface Listener {
+
+        /**
+         * Reports extraction progress.
+         *
+         * @param entries entries processed so far
+         * @param compressedBytes compressed bytes consumed so far
+         * @param currentEntry path of the entry just processed
+         */
         void onProgress(long entries, long compressedBytes, String currentEntry);
     }
 
@@ -33,10 +41,24 @@ public final class TarGzExtractor {
 
     private final Listener listener;
 
+    /**
+     * Creates an extractor.
+     *
+     * @param listener optional progress listener
+     */
     public TarGzExtractor(Listener listener) {
         this.listener = listener;
     }
 
+    /**
+     * Streams the gzip-compressed tar archive into the destination directory.
+     *
+     * @param tarGz gzip-compressed tar stream; not closed by this call
+     * @param destination directory to populate, created when missing
+     * @return the number of processed entries
+     * @throws IOException on malformed archives, unsafe entry paths, symlink
+     *                     escapes, or when the 512 MiB total size cap is exceeded
+     */
     public int extract(InputStream tarGz, File destination) throws IOException {
         if (!destination.isDirectory() && !destination.mkdirs() && !destination.isDirectory()) {
             throw new IOException("Cannot create extraction directory: " + destination);
@@ -133,7 +155,7 @@ public final class TarGzExtractor {
                                 + " bytes");
                     }
                 } else {
-                    // 设备文件、FIFO 等特殊条目不应出现在应用沙箱中。
+                    // Device, FIFO and similar entries must not appear in the app sandbox.
                     skipFully(gzip, size);
                 }
 
@@ -146,16 +168,18 @@ public final class TarGzExtractor {
             try {
                 gzip.close();
             } catch (IOException ignored) {
-                // 真实失败由调用方处理。
+                // The real failure is reported by the caller.
             }
         }
         return entries;
     }
 
+    /** Reports whether a non-regular entry type is silently skipped. */
     private static boolean isSkippable(char type) {
         return type == '3' || type == '4' || type == '6' || type == 'D';
     }
 
+    /** Reports whether a header block is the all-zero end-of-archive marker. */
     private static boolean isZeroBlock(byte[] header) {
         for (byte value : header) {
             if (value != 0) {
@@ -165,6 +189,7 @@ public final class TarGzExtractor {
         return true;
     }
 
+    /** Decodes a NUL-terminated header field as UTF-8. */
     private static String decodeName(byte[] header, int offset, int length) {
         int end = offset;
         int limit = offset + length;
@@ -174,6 +199,7 @@ public final class TarGzExtractor {
         return new String(header, offset, end - offset, StandardCharsets.UTF_8);
     }
 
+    /** Parses an octal header field, supporting the GNU base-256 extension. */
     private static long parseNumber(byte[] header, int offset, int length, long fallback) {
         if ((header[offset] & 0x80) != 0) {
             long value = 0L;
@@ -201,6 +227,7 @@ public final class TarGzExtractor {
         return seen ? value : fallback;
     }
 
+    /** Reads and UTF-8 decodes an inline payload such as a long name or PAX block. */
     private static String readString(InputStream in, long size) throws IOException {
         if (size <= 0 || size > 1024L * 1024L) {
             skipFully(in, size);
@@ -216,6 +243,7 @@ public final class TarGzExtractor {
         return new String(data, 0, end, StandardCharsets.UTF_8);
     }
 
+    /** Extracts one key from a PAX extended header block. */
     private static String paxValue(String pax, String key, String fallback) {
         String prefix = key + "=";
         for (String line : pax.split("\n")) {
@@ -227,7 +255,8 @@ public final class TarGzExtractor {
     }
 
     /**
-     * 返回相对目标目录的路径；条目试图越出根目录时返回 null。
+     * Returns the entry path relative to the destination; null when the entry
+     * attempts to escape the root directory.
      */
     static String safeRelativePath(String raw) {
         if (raw == null) {
@@ -265,8 +294,9 @@ public final class TarGzExtractor {
     }
 
     /**
-     * 在根目录内解析条目相对路径，并虚拟跟随已存在的符号链接，
-     * 防止 tar 条目经符号链接目录写入宿主文件系统。
+     * Resolves an entry path inside the root, virtually following existing
+     * symbolic links so tar entries cannot write through them onto the host
+     * file system.
      */
     private static File resolveInsideRoot(File root, String relative) throws IOException {
         java.util.ArrayDeque<String> pending = new java.util.ArrayDeque<>();
@@ -323,6 +353,7 @@ public final class TarGzExtractor {
         return result;
     }
 
+    /** Consumes the block padding following an entry payload. */
     private static void skipPadding(InputStream in, long size) throws IOException {
         long padding = (BLOCK - (size % BLOCK)) % BLOCK;
         long skipped = 0L;
@@ -339,12 +370,14 @@ public final class TarGzExtractor {
         }
     }
 
+    /** Creates a directory, tolerating concurrent creation. */
     private static void ensureDirectory(File dir) throws IOException {
         if (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {
             throw new IOException("Cannot create directory: " + dir);
         }
     }
 
+    /** Creates a symbolic link, replacing any existing entry at the target. */
     private static void createSymlink(File target, String linkName) throws IOException {
         ensureDirectory(target.getParentFile());
         Files.deleteIfExists(target.toPath());
@@ -357,6 +390,9 @@ public final class TarGzExtractor {
         }
     }
 
+    /**
+     * Creates a hard link, degrading to a byte copy where the platform forbids it.
+     */
     private static void createHardLink(File root, File target, String linkName, long mode)
             throws IOException {
         String relative = safeRelativePath(linkName);
@@ -373,9 +409,9 @@ public final class TarGzExtractor {
             Files.createLink(target.toPath(), source.toPath());
             return;
         } catch (IOException | UnsupportedOperationException error) {
-            // Android 12+ 的 SELinux 禁止在应用数据目录创建硬链接
-            // （untrusted_app_27 报 "avc: denied { link }"），因此退化为字节复制。
-            // Ubuntu Base 仅含两个硬链接（perl、uncompress），开销可忽略。
+            // On Android 12+ SELinux forbids hard links in app data directories
+            // (untrusted_app_27 logs "avc: denied { link }"), so degrade to a byte
+            // copy. Ubuntu Base contains only two hard links; the cost is negligible.
         }
         try (InputStream in = new java.io.FileInputStream(source);
              OutputStream out = new FileOutputStream(target)) {
@@ -388,6 +424,7 @@ public final class TarGzExtractor {
         applyMode(target, mode, false);
     }
 
+    /** Writes a regular file payload, replacing a pre-existing symlink at the target. */
     private static long writeFile(InputStream in, File target, long size, long mode)
             throws IOException {
         ensureDirectory(target.getParentFile());
@@ -412,6 +449,7 @@ public final class TarGzExtractor {
         return size;
     }
 
+    /** Applies stored permission bits with a java.io executable-bit fallback. */
     private static void applyMode(File target, long mode, boolean directory) {
         int bits = (int) (mode & 0777);
         if (directory) {
@@ -448,8 +486,9 @@ public final class TarGzExtractor {
         try {
             Files.setPosixFilePermissions(target.toPath(), permissions);
         } catch (UnsupportedOperationException | IOException ignored) {
-            // 部分文件系统（FUSE、sdcard）拒绝 POSIX 权限；java.io 回退只保证可执行位，
-            // 这对内置 shell 工具而言已足够。
+            // Some file systems (FUSE, sdcard) reject POSIX permissions; the java.io
+            // fallback only preserves the executable bit, which suffices for the
+            // bundled shell tools.
             if ((bits & 0111) != 0) {
                 //noinspection ResultOfMethodCallIgnored
                 target.setExecutable(true, false);
@@ -457,6 +496,7 @@ public final class TarGzExtractor {
         }
     }
 
+    /** Reads until the buffer is full or the stream ends. */
     private static int readFully(InputStream in, byte[] buffer) throws IOException {
         int total = 0;
         while (total < buffer.length) {
@@ -469,6 +509,7 @@ public final class TarGzExtractor {
         return total;
     }
 
+    /** Consumes an entry payload plus its block padding from the stream. */
     private static void skipFully(InputStream in, long bytes) throws IOException {
         long remaining = bytes;
         byte[] buffer = new byte[8192];
@@ -494,18 +535,22 @@ public final class TarGzExtractor {
         }
     }
 
+    /** Input stream wrapper counting the compressed bytes consumed so far. */
     private static final class CountingInputStream extends InputStream {
         private final InputStream delegate;
         private long count;
 
+        /** Wraps the given delegate stream. */
         CountingInputStream(InputStream delegate) {
             this.delegate = delegate;
         }
 
+        /** Returns the number of bytes read through this stream. */
         long count() {
             return count;
         }
 
+        /** Counts and forwards a single-byte read. */
         @Override
         public int read() throws IOException {
             int value = delegate.read();
@@ -515,6 +560,7 @@ public final class TarGzExtractor {
             return value;
         }
 
+        /** Counts and forwards a bulk read. */
         @Override
         public int read(byte[] buffer, int offset, int length) throws IOException {
             int read = delegate.read(buffer, offset, length);
@@ -524,6 +570,7 @@ public final class TarGzExtractor {
             return read;
         }
 
+        /** Counts and forwards a skip. */
         @Override
         public long skip(long bytes) throws IOException {
             long skipped = delegate.skip(bytes);
@@ -533,6 +580,7 @@ public final class TarGzExtractor {
             return skipped;
         }
 
+        /** Closes the delegate stream. */
         @Override
         public void close() throws IOException {
             delegate.close();

@@ -28,13 +28,19 @@ import cn.lineai.terminal.extension.runtime.ShellRunner;
 import cn.lineai.terminal.extension.runtime.WorkerPool;
 
 /**
- * 状态与安装页，不设桌面入口。可通过
+ * Status and installation page; deliberately has no launcher entry. Opened via
  * {@code adb shell am start -n cn.lineai.terminal.extension/.ui.StatusActivity}
- * 或导出的 {@code cn.lineai.action.OPEN_TERMINAL_EXTENSION} action 打开。
+ * or the exported {@code cn.lineai.action.OPEN_TERMINAL_EXTENSION} action. The
+ * page polls the shared {@link ProotEnvironment} state and renders install
+ * progress, paths and diagnostics.
  */
 public final class StatusActivity extends Activity {
 
-    /** 可选 intent extra，用于无界面安装：{@code adb ... am start --ez auto_install true}。 */
+    /**
+     * Optional intent extra enabling headless installation; set it to
+     * {@code true} with, for example,
+     * {@code adb ... am start --ez auto_install true}.
+     */
     public static final String EXTRA_AUTO_INSTALL = "auto_install";
 
     private ProotEnvironment environment;
@@ -53,6 +59,7 @@ public final class StatusActivity extends Activity {
     private boolean testRunning;
 
     private final Runnable poll = new Runnable() {
+        /** Repaints the environment state and reschedules itself at a fixed interval. */
         @Override
         public void run() {
             render();
@@ -60,6 +67,12 @@ public final class StatusActivity extends Activity {
         }
     };
 
+    /**
+     * Builds the interface, honors the {@link #EXTRA_AUTO_INSTALL} extra and
+     * triggers installation when appropriate.
+     *
+     * @param savedInstanceState previously saved state, unused by this page
+     */
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -80,6 +93,7 @@ public final class StatusActivity extends Activity {
         render();
     }
 
+    /** Starts the periodic state poll while the page is visible. */
     @Override
     protected void onResume() {
         super.onResume();
@@ -87,12 +101,14 @@ public final class StatusActivity extends Activity {
         handler.post(poll);
     }
 
+    /** Stops the periodic state poll. */
     @Override
     protected void onPause() {
         handler.removeCallbacks(poll);
         super.onPause();
     }
 
+    /** Constructs the whole interface programmatically. */
     private View buildUi() {
         ScrollView scroll = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
@@ -217,6 +233,7 @@ public final class StatusActivity extends Activity {
         return scroll;
     }
 
+    /** Publishes environment state, install progress, paths and warnings to the widgets. */
     private void render() {
         if (isFinishing()) {
             return;
@@ -264,9 +281,11 @@ public final class StatusActivity extends Activity {
         installButton.setEnabled(!installing);
     }
 
+    /** Guards installation triggers and asks for confirmation before a reinstall. */
     private void onInstallClicked() {
         if (!environment.isArm64()) {
-            // 安装流程与 CPU 架构无关：解压可在任意设备执行，只有 PRoot 执行需要 arm64。
+            // Installation itself is architecture independent: extraction works on
+            // any device, only PRoot execution requires arm64.
             Toast.makeText(this, R.string.status_abi_missing, Toast.LENGTH_LONG).show();
         }
         if (environment.isInstalling()) {
@@ -286,6 +305,7 @@ public final class StatusActivity extends Activity {
         startInstall(false);
     }
 
+    /** Runs install or reinstall on the worker pool, logging completion and failures. */
     private void startInstall(boolean reinstall) {
         appendLog(getString(R.string.install_started));
         installButton.setEnabled(false);
@@ -311,6 +331,7 @@ public final class StatusActivity extends Activity {
         });
     }
 
+    /** Runs a guest shell probe and streams its output into the log view. */
     private void onTestClicked() {
         if (testRunning) {
             return;
@@ -333,16 +354,19 @@ public final class StatusActivity extends Activity {
             int exitCode = environment.shellRunner().execute(
                     getString(R.string.test_command), environment.paths().homePath(),
                     120_000L, new ShellRunner.Callback() {
+                        /** Appends guest output to the log on the UI thread. */
                         @Override
                         public void onOutput(String text) {
                             handler.post(() -> appendLog(text));
                         }
 
+                        /** Appends a failure line to the log on the UI thread. */
                         @Override
                         public void onError(String text) {
                             handler.post(() -> appendLog(getString(R.string.test_failed, text)));
                         }
 
+                        /** Records the exit code and releases the running flag. */
                         @Override
                         public void onComplete(int code) {
                             handler.post(() -> {
@@ -357,15 +381,18 @@ public final class StatusActivity extends Activity {
         });
     }
 
+    /** Launches the IPC self-test and streams its report into the log view. */
     private void onIpcSelfTestClicked() {
         appendLog("---------- IPC ----------");
         IpcSelfTest.run(this, WorkerPool.shared(), text -> handler.post(() -> appendLog(text)));
     }
 
+    /** Clears the log view. */
     private void clearLog() {
         logView.setText("");
     }
 
+    /** Appends text to the log view and scrolls it to the bottom. */
     private void appendLog(String text) {
         if (TextUtils.isEmpty(text)) {
             return;
@@ -377,6 +404,12 @@ public final class StatusActivity extends Activity {
         logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
     }
 
+    /**
+     * Formats a byte count in mebibytes.
+     *
+     * @param bytes byte count to format
+     * @return formatted size, or the unknown marker when the count is not positive
+     */
     private String formatSize(long bytes) {
         if (bytes <= 0L) {
             return getString(R.string.size_unknown);
@@ -385,10 +418,17 @@ public final class StatusActivity extends Activity {
         return String.format(Locale.US, "%.1f MB", megabytes);
     }
 
+    /**
+     * Converts density-independent pixels to device pixels.
+     *
+     * @param value dp value to convert
+     * @return rounded pixel value
+     */
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
+    /** Returns the message of a throwable, falling back to its string form. */
     private static String describe(Throwable error) {
         String message = error.getMessage();
         return message == null || message.isEmpty() ? error.toString() : message;

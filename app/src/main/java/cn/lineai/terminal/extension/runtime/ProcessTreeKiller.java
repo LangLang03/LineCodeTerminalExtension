@@ -16,14 +16,28 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-/** 终止 proot 进程及其全部 guest 子进程（PRoot 子进程延续 ptrace 链）。 */
+/**
+ * Terminates a PRoot host process together with all of its guest descendants.
+ * Guest processes inherit the PRoot ptrace chain, so destroying only the
+ * launcher would leave guest shells alive; this class therefore walks
+ * {@code /proc} to collect the descendant set and delivers SIGKILL before the
+ * {@link Process} handle itself is destroyed.
+ */
 final class ProcessTreeKiller {
 
     private static final String TAG = "ProcessTreeKiller";
 
+    /** Suppresses instantiation; all members are static. */
     private ProcessTreeKiller() {
     }
 
+    /**
+     * Kills the process and every descendant visible in {@code /proc}, then
+     * destroys the {@link Process} handle. Falls back to {@link Process#destroy()}
+     * when the platform pid cannot be determined reflectively.
+     *
+     * @param process process to terminate; ignored when {@code null}
+     */
     static void kill(Process process) {
         if (process == null) {
             return;
@@ -40,6 +54,7 @@ final class ProcessTreeKiller {
         process.destroy();
     }
 
+    /** Reads the platform pid via reflection; returns -1 when unavailable. */
     private static int processPid(Process process) {
         try {
             Field field = process.getClass().getDeclaredField("pid");
@@ -49,11 +64,16 @@ final class ProcessTreeKiller {
                 return (Integer) value;
             }
         } catch (Throwable ignored) {
-            // Android 的 Process 实现可能变化，取不到 pid 时退回 destroy()。
+            // The Android Process implementation may change; fall back to destroy()
+            // when the pid cannot be read.
         }
         return -1;
     }
 
+    /**
+     * Walks {@code /proc} and resolves the transitive descendant set of the root
+     * pid by iterating the parent-child relation until it is closed.
+     */
     private static Set<Integer> collectDescendants(int rootPid) {
         Map<Integer, Integer> parentByPid = new HashMap<>();
         File[] dirs = new File("/proc").listFiles();
@@ -90,6 +110,7 @@ final class ProcessTreeKiller {
         return descendants;
     }
 
+    /** Extracts the parent pid from a procfs stat line, skipping the comm field. */
     private static int parseParent(String stat) {
         int close = stat.lastIndexOf(')');
         if (close < 0) {
@@ -110,6 +131,7 @@ final class ProcessTreeKiller {
         }
     }
 
+    /** Reads the first line of a procfs stat file; returns null when unreadable. */
     private static String readStatLine(File procDir) {
         File stat = new File(procDir, "stat");
         try (BufferedReader reader = new BufferedReader(
@@ -120,6 +142,7 @@ final class ProcessTreeKiller {
         }
     }
 
+    /** Delivers SIGKILL, tolerating already exited or protected pids. */
     private static void safeKill(int pid) {
         if (pid <= 0) {
             return;

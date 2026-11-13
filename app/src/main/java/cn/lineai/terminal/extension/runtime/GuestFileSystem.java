@@ -9,9 +9,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 经 {@code ITerminalProviderService} 暴露的文件操作。路径为以 Ubuntu rootfs 为根的
- * guest Linux 路径；行为对齐 LineCode 参考终端 provider：1 MB 分块、单次读取上限 32 MB、
- * offset 为 -1 时追加、删除不递归。
+ * File operations exposed through {@code ITerminalProviderService}. Paths are
+ * guest Linux paths rooted at the Ubuntu rootfs; behavior mirrors the LineCode
+ * reference terminal provider: 1 MiB chunks, a 32 MiB single-read cap, negative
+ * offsets meaning append, and non-recursive deletion. Operations fail closed,
+ * returning empty results or {@code false} instead of throwing across IPC.
  */
 public final class GuestFileSystem {
 
@@ -22,11 +24,24 @@ public final class GuestFileSystem {
     private final GuestPaths paths;
     private final String home;
 
+    /**
+     * Creates the facade over the given rootfs.
+     *
+     * @param rootfsDir host directory of the extracted rootfs
+     * @param homePath guest home directory used as the default for listing
+     */
     public GuestFileSystem(File rootfsDir, String homePath) {
         this.paths = new GuestPaths(rootfsDir);
         this.home = homePath;
     }
 
+    /**
+     * Reads a whole guest file, up to the 32 MiB single-read cap.
+     *
+     * @param path absolute guest path
+     * @return the file contents, or an empty array when the path is missing,
+     *         oversized or unreadable
+     */
     public byte[] readFile(String path) {
         if (path == null || path.isEmpty()) {
             return new byte[0];
@@ -63,10 +78,26 @@ public final class GuestFileSystem {
         }
     }
 
+    /**
+     * Writes or truncates a guest file at offset zero.
+     *
+     * @param path absolute guest path
+     * @param data payload to write
+     * @return true when the payload was written
+     */
     public boolean writeFile(String path, byte[] data) {
         return writeFileChunk(path, 0L, data);
     }
 
+    /**
+     * Reads one chunk of a guest file starting at the given offset; a
+     * non-positive size selects the default chunk size.
+     *
+     * @param path absolute guest path
+     * @param offset byte offset to read from; negative values are clamped to zero
+     * @param size maximum number of bytes to read
+     * @return the requested bytes, or an empty array when unavailable
+     */
     public byte[] readFileChunk(String path, long offset, int size) {
         if (path == null || path.isEmpty()) {
             return new byte[0];
@@ -111,6 +142,15 @@ public final class GuestFileSystem {
         }
     }
 
+    /**
+     * Writes one chunk at an explicit offset, or appends when the offset is
+     * negative. Missing parent directories are created.
+     *
+     * @param path absolute guest path
+     * @param offset byte offset to write at; negative values append
+     * @param data payload to write
+     * @return true when the payload was written
+     */
     public boolean writeFileChunk(String path, long offset, byte[] data) {
         if (path == null || path.isEmpty()) {
             return false;
@@ -138,6 +178,12 @@ public final class GuestFileSystem {
         }
     }
 
+    /**
+     * Deletes a single guest file; directories are not traversed.
+     *
+     * @param path absolute guest path
+     * @return true when the file was removed
+     */
     public boolean deleteFile(String path) {
         if (path == null || path.isEmpty()) {
             return false;
@@ -153,6 +199,12 @@ public final class GuestFileSystem {
         }
     }
 
+    /**
+     * Lists the entry names of a guest directory.
+     *
+     * @param path absolute guest path; the guest home is used when empty
+     * @return entry names, or an empty array when the path is not a directory
+     */
     public String[] listDir(String path) {
         File dir = resolveDir(path);
         if (dir == null) {
@@ -169,6 +221,12 @@ public final class GuestFileSystem {
         return names.toArray(new String[0]);
     }
 
+    /**
+     * Tests existence of a guest path.
+     *
+     * @param path absolute guest path
+     * @return true when the mapped host file exists
+     */
     public boolean fileExists(String path) {
         if (path == null || path.isEmpty()) {
             return false;
@@ -181,6 +239,12 @@ public final class GuestFileSystem {
         }
     }
 
+    /**
+     * Returns the size of a guest file.
+     *
+     * @param path absolute guest path
+     * @return the file size in bytes, or -1 when the path is not a regular file
+     */
     public long fileSize(String path) {
         if (path == null || path.isEmpty()) {
             return -1L;
@@ -196,10 +260,22 @@ public final class GuestFileSystem {
         }
     }
 
+    /**
+     * Alias of {@link #fileSize(String)} kept for symmetry with the AIDL contract.
+     *
+     * @param path absolute guest path
+     * @return the file size in bytes, or -1 when the path is not a regular file
+     */
     public long getFileSize(String path) {
         return fileSize(path);
     }
 
+    /**
+     * Lists a guest directory as a JSON array with name, type and size per entry.
+     *
+     * @param path absolute guest path; the guest home is used when empty
+     * @return a JSON array document, possibly empty
+     */
     public String listDirDetailed(String path) {
         File dir = resolveDir(path);
         StringBuilder out = new StringBuilder("[");
@@ -220,10 +296,12 @@ public final class GuestFileSystem {
         return out.append(']').toString();
     }
 
+    /** Resolves a guest path for reading via {@link GuestPaths#resolve(String)}. */
     private File resolveReadable(String path) throws IOException {
         return paths.resolve(path);
     }
 
+    /** Resolves a guest directory, defaulting to the guest home for empty paths. */
     private File resolveDir(String path) {
         try {
             String target = path == null || path.isEmpty() ? home : path;

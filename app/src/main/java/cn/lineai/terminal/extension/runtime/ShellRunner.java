@@ -12,16 +12,36 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 通过 /bin/bash 在 PRoot guest 内执行命令。每次调用启动一个 proot 进程，
- * stdout 与 stderr 合并后按 UTF-8 分块回传。
+ * Executes commands inside the PRoot guest through {@code /bin/bash}. Each
+ * invocation spawns one proot host process; stdout and stderr are merged and
+ * streamed back to the caller as UTF-8 chunks.
  */
 public final class ShellRunner {
 
+    /**
+     * Streaming callbacks for a guest command execution.
+     */
     public interface Callback {
+
+        /**
+         * Delivers merged guest output decoded as UTF-8.
+         *
+         * @param text decoded output chunk
+         */
         void onOutput(String text);
 
+        /**
+         * Delivers a diagnostic message (timeout, spawn failure, interruption).
+         *
+         * @param text human-readable failure description
+         */
         void onError(String text);
 
+        /**
+         * Signals completion of the guest process.
+         *
+         * @param exitCode guest exit code; negative values indicate failure modes
+         */
         void onComplete(int exitCode);
     }
 
@@ -31,11 +51,24 @@ public final class ShellRunner {
     private final RuntimePaths paths;
     private final ExecutorService workers = WorkerPool.shared();
 
+    /**
+     * Creates a runner bound to the given runtime layout.
+     *
+     * @param paths runtime path layout providing binary and rootfs locations
+     */
     public ShellRunner(RuntimePaths paths) {
         this.paths = paths;
     }
 
-    /** 构建 guest 命令使用的完整 argv。 */
+    /**
+     * Assembles the full host argv for a guest command: PRoot flags, rootfs and
+     * system mounts, a fixed guest environment, and {@code /bin/bash -lc}.
+     *
+     * @param command shell command line executed inside the guest
+     * @param cwd guest working directory; the home directory is used when absent
+     *            or invalid
+     * @return the complete argv, starting with the proot binary
+     */
     public List<String> buildCommand(String command, String cwd) {
         String guestCwd = normalizeCwd(cwd);
         List<String> argv = new ArrayList<>();
@@ -69,7 +102,12 @@ public final class ShellRunner {
         return argv;
     }
 
-    /** proot 宿主进程自身的环境变量。 */
+    /**
+     * Builds the environment variables for the proot host process itself (as
+     * opposed to the guest environment embedded in the argv).
+     *
+     * @return variables locating the loader, temporary directory and libraries
+     */
     public java.util.Map<String, String> buildEnvironment() {
         java.util.Map<String, String> env = new java.util.LinkedHashMap<>();
         env.put("PROOT_LOADER", paths.prootLoader().getAbsolutePath());
@@ -78,6 +116,19 @@ public final class ShellRunner {
         return env;
     }
 
+    /**
+     * Runs a command in the guest and blocks until completion or timeout.
+     *
+     * @param command shell command line; an empty command is rejected
+     * @param cwd guest working directory; the home directory is used when absent
+     *            or invalid
+     * @param timeoutMs wall-clock limit, clamped to 30 minutes; a non-positive
+     *                  value selects the 30 second default
+     * @param callback streaming callbacks; may be {@code null}
+     * @return the guest exit code when non-negative; otherwise a sentinel:
+     *         -1 when the command is empty or the process could not start,
+     *         -2 when the timeout elapsed
+     */
     public int execute(String command, String cwd, long timeoutMs, Callback callback) {
         if (command == null || command.trim().isEmpty()) {
             if (callback != null) {
@@ -109,7 +160,7 @@ public final class ShellRunner {
             try {
                 reader.get(3, TimeUnit.SECONDS);
             } catch (Exception ignored) {
-                // 进程已退出，仍阻塞的读取线程会随 EOF 很快返回。
+                // The process has exited; a still-blocked reader returns at EOF shortly.
             }
             int exitCode = process.exitValue();
             if (callback != null) {
@@ -139,6 +190,7 @@ public final class ShellRunner {
         }
     }
 
+    /** Pumps merged process output to the callback until EOF or cancellation. */
     private void pump(Process process, Callback callback, AtomicBoolean finished) {
         try (Reader reader = new InputStreamReader(process.getInputStream(),
                 StandardCharsets.UTF_8)) {
@@ -153,10 +205,11 @@ public final class ShellRunner {
                 }
             }
         } catch (IOException ignored) {
-            // 进程被杀或已关闭流；执行结果以退出码为准。
+            // The process was killed or its stream closed; the exit code is authoritative.
         }
     }
 
+    /** Falls back to the guest home for null, empty or invalid working directories. */
     private String normalizeCwd(String cwd) {
         String home = paths.homePath();
         if (cwd == null || cwd.trim().isEmpty()) {
@@ -169,6 +222,7 @@ public final class ShellRunner {
         }
     }
 
+    /** Returns the message of a throwable, falling back to its string form. */
     private static String describe(Throwable error) {
         String message = error.getMessage();
         return message == null || message.isEmpty() ? error.toString() : message;
