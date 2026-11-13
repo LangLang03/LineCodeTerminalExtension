@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LineCode终端扩展</string>
+
+    <string name="status_title">LineCode 终端扩展</string>
+    <string name="status_subtitle">内置 PRoot + Ubuntu 22.04.5 LTS（arm64）</string>
+    <string name="status_state_missing">状态：Ubuntu 环境未安装</string>
+    <string name="status_state_installing">状态：正在安装 Ubuntu 环境…</string>
+    <string name="status_state_ready">状态：Ubuntu 环境已就绪</string>
+    <string name="status_state_failed">状态：安装失败</string>
+    <string name="status_abi_missing">当前设备不是 arm64 设备，内置的 PRoot 与 Ubuntu 无法运行。</string>
+    <string name="status_paths">安装位置：%1$s</string>
+    <string name="status_proot">PRoot：%1$s</string>
+    <string name="status_size">占用空间：%1$s</string>
+    <string name="status_install">安装 / 重新安装</string>
+    <string name="status_test">运行测试命令</string>
+    <string name="status_clear_log">清空日志</string>
+    <string name="status_ipc_test">IPC 自检</string>
+    <string name="status_reinstall_title">重新安装 Ubuntu 环境</string>
+    <string name="status_reinstall_message">重新安装会重置 Ubuntu 环境（保留 /root/workspace 中的文件）。继续？</string>
+    <string name="status_reinstall_ok">重新安装</string>
+    <string name="common_cancel">取消</string>
+    <string name="install_started">开始安装 Ubuntu 环境…</string>
+    <string name="install_progress">安装进度：%1$d%%  %2$s</string>
+    <string name="install_done">Ubuntu 环境安装完成</string>
+    <string name="install_failed">Ubuntu 环境安装失败：%1$s</string>
+    <string name="install_busy">正在安装中，请稍候…</string>
+    <string name="test_started">执行测试命令：%1$s</string>
+    <string name="test_finished">测试命令结束，退出码 %1$d</string>
+    <string name="test_failed">测试命令失败：%1$s</string>
+    <string name="test_needs_install">需要先安装 Ubuntu 环境。</string>
+    <string name="log_empty">（暂无日志）</string>
+    <string name="status_log_label">运行日志</string>
+    <string name="size_unknown">未知</string>
+    <string name="test_command">uname -a; id; bash --version | head -1; cat /etc/os-release | head -2; ls /</string>
+</resources>

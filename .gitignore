@@ -1,0 +1,26 @@
+# Gradle / IDE
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Packaged artifacts and temporary files
+*.apk
+*.aab
+*.idsig
+*.apk.idsig
+temp/
+tmp/
+*.log
+.DS_Store
+
+# Signing material
+*.keystore
+*.jks
+signing.properties
+key.properties

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Required by LineCode's IpcProviderScanner: it only lists providers that declare this. -->
+    <uses-permission android:name="cn.lineai.permission.IPC_TERMINAL_PROVIDER" />
+
+    <application
+        android:name=".TerminalExtensionApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <service
+            android:name=".service.TerminalProviderService"
+            android:exported="true"
+            android:permission="cn.lineai.permission.IPC_TERMINAL_PROVIDER">
+            <intent-filter>
+                <action android:name="cn.lineai.action.IPC_TERMINAL_PROVIDER" />
+            </intent-filter>
+        </service>
+
+        <!-- Status/setup page. Deliberately has no MAIN/LAUNCHER entry: the app stays
+             invisible on the launcher but keeps the LineCode icon in app info. -->
+        <activity
+            android:name=".ui.StatusActivity"
+            android:excludeFromRecents="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="cn.lineai.action.OPEN_TERMINAL_EXTENSION" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>

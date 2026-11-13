@@ -1,0 +1,46 @@
+Embedded runtime for LineCode终端扩展
+=====================================
+
+Every file in this directory is embedded into the APK and unpacked on first run.
+Run tools/fetch-runtime.sh from the project root to download and verify them again.
+
+ubuntu-22.04.5-base-arm64.targz
+  source: https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04.5-base-arm64.tar.gz
+  size:   27671306
+  sha256: 075d4abd2817a5023ab0a82f5cb314c5ec0aa64a9c0b40fd3154ca3bfdae979f
+
+proot
+  source: https://packages.termux.dev/apt/termux-main/pool/main/p/proot/proot_5.1.107.102_aarch64.deb
+          -> data/data/com.termux/files/usr/bin/proot
+  sha256: 3621937c1c5a98d0d39ca599af573a6bc15128690606d535e8b05da00cec4f41
+
+proot-loader
+  source: https://packages.termux.dev/apt/termux-main/pool/main/p/proot/proot_5.1.107.102_aarch64.deb
+          -> data/data/com.termux/files/usr/libexec/proot/loader
+  sha256: 1da54355333cca3fb6ee10e3b82a24df24fb230c99241ce83809bf9e240609b5
+
+libtalloc.so.2
+  source: https://packages.termux.dev/apt/termux-main/pool/main/libt/libtalloc/libtalloc_2.5.0_aarch64.deb
+          -> data/data/com.termux/files/usr/lib/libtalloc.so.2.5.0
+  sha256: 742b438c4d09e276985a61d44164c9de207b6d8cc268f3018cb3001961bcb309
+
+libandroid-shmem.so
+  source: https://packages.termux.dev/apt/termux-main/pool/main/liba/libandroid-shmem/libandroid-shmem_0.7_aarch64.deb
+          -> data/data/com.termux/files/usr/lib/libandroid-shmem.so
+  sha256: 84475798e07c8174dbbfaec70a827fdb02f19ffa69a589380c13e7507fd0e731
+
+busybox
+  source: http://ports.ubuntu.com/ubuntu-ports/pool/main/b/busybox/busybox-static_1.37.0-7ubuntu1.1_arm64.deb
+          -> usr/bin/busybox
+  sha256: 6db97dc211d50486ea94ecf3fbbc36a390f10d8eed86920aa356cb42bc30efde
+
+cacert.pem
+  source: https://curl.se/ca/cacert.pem
+  sha256: 427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285
+
+Notes
+-----
+- proot and busybox are aarch64 (arm64) binaries; this extension only supports arm64 devices.
+- targetSdk is 28 on purpose: Android 10+ blocks exec of app-data binaries for API 29+ apps.
+- PRoot is GPLv2 (Termux build). Ubuntu Base is Ubuntu's base image; busybox is GPLv2.
+  See THIRD_PARTY_NOTICES.md.
