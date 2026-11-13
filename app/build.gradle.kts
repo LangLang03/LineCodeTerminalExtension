@@ -2,6 +2,11 @@ plugins {
     id("com.android.application")
 }
 
+import java.util.Properties
+
+// Public version; the release workflow reads both values to decide whether to publish.
+val releaseVersionName = "1.0.0"
+
 val embeddedRuntimeDir = layout.projectDirectory.dir("src/main/assets/runtime")
 val requiredRuntimeAssets = listOf(
     "ubuntu-22.04.5-base-arm64.targz",
@@ -48,7 +53,7 @@ android {
         // that for apps targeting API 29+, so this extension intentionally stays at 28.
         targetSdk = 28
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = releaseVersionName
     }
 
     compileOptions {
@@ -68,6 +73,22 @@ android {
         layout.buildDirectory.dir("generated/licenses-assets").get().asFile
     )
 
+    // Release signing mirrors LineCode: the CI workflow decodes RELEASE_KEYSTORE_BASE64
+    // into signing/ and writes signing.properties; local release builds use the same file.
+    signingConfigs {
+        create("release") {
+            val propertiesFile = rootProject.file("signing.properties")
+            if (propertiesFile.isFile) {
+                val properties = Properties()
+                properties.load(propertiesFile.inputStream())
+                storeFile = file(properties.getProperty("storeFile"))
+                storePassword = properties.getProperty("storePassword")
+                keyAlias = properties.getProperty("keyAlias")
+                keyPassword = properties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -75,6 +96,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -91,4 +113,23 @@ android {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+}
+
+tasks.register("validateReleaseSigning") {
+    group = "verification"
+    description = "Fails the release build early when the signing configuration is incomplete."
+    doLast {
+        val config = android.signingConfigs.getByName("release")
+        if (config.storeFile == null || !config.storeFile!!.isFile) {
+            throw GradleException(
+                "Release keystore is missing. Decode RELEASE_KEYSTORE_BASE64 into signing/ and" +
+                    " write signing.properties (storeFile/storePassword/keyAlias/keyPassword)."
+            )
+        }
+        if (config.storePassword.isNullOrEmpty() || config.keyAlias.isNullOrEmpty() ||
+            config.keyPassword.isNullOrEmpty()
+        ) {
+            throw GradleException("Release signing properties are incomplete.")
+        }
+    }
 }
