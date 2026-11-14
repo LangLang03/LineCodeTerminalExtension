@@ -8,7 +8,9 @@ import android.util.Log;
 
 import cn.lineai.ipc.terminal.ITerminalProviderCallback;
 import cn.lineai.ipc.terminal.ITerminalProviderService;
+import cn.lineai.ipc.terminal.TerminalShellBackgroundState;
 import cn.lineai.terminal.extension.TerminalExtensionApp;
+import cn.lineai.terminal.extension.runtime.BackgroundGuestTasks;
 import cn.lineai.terminal.extension.runtime.ProotEnvironment;
 import cn.lineai.terminal.extension.runtime.ShellRunner;
 
@@ -26,6 +28,7 @@ public final class TerminalProviderService extends Service {
     private static final int EXIT_NOT_READY = -3;
 
     private ProotEnvironment environment;
+    private BackgroundGuestTasks backgroundTasks;
     private IBinder binder;
 
     /** Acquires the shared environment, starts the install and creates the binder. */
@@ -34,6 +37,7 @@ public final class TerminalProviderService extends Service {
         super.onCreate();
         environment = TerminalExtensionApp.environment(this);
         environment.startBackgroundInstall();
+        backgroundTasks = new BackgroundGuestTasks(environment.shellRunner());
         binder = new ProviderBinder();
     }
 
@@ -49,10 +53,16 @@ public final class TerminalProviderService extends Service {
         return binder;
     }
 
-    /** Logs teardown; the shared environment outlives this service instance. */
+    /**
+     * Logs teardown and kills every still-running background guest task; the shared
+     * environment outlives this service instance.
+     */
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy");
+        if (backgroundTasks != null) {
+            backgroundTasks.shutdown();
+        }
         super.onDestroy();
     }
 
@@ -77,6 +87,67 @@ public final class TerminalProviderService extends Service {
         @Override
         public boolean isAvailable() {
             return environment.isReady();
+        }
+
+        /**
+         * Starts a guest command in the background after waiting for the environment to
+         * become ready. The caller receives a handle immediately; output streams through
+         * the callback and stays addressable by offset through {@link #readShellBackground}.
+         *
+         * @param command guest shell command line; empty commands fail
+         * @param cwd guest working directory; the home directory is used when absent
+         * @param callback streaming callback; may be {@code null}
+         * @return the task handle, or 0 when the environment never became ready and -1
+         *         when the process could not be started (both are failures per contract)
+         */
+        @Override
+        public long startShellBackground(String command, String cwd,
+                                         ITerminalProviderCallback callback) {
+            if (command == null || command.trim().isEmpty()) {
+                notifyError(callback, "command must not be empty");
+                return -1;
+            }
+            if (!environment.awaitReady(READY_WAIT_MS)) {
+                String reason = environment.lastError();
+                notifyError(callback, reason == null || reason.isEmpty()
+                        ? "Ubuntu environment is not ready"
+                        : "Ubuntu environment is not ready: " + reason);
+                return 0;
+            }
+            return backgroundTasks.start(command, cwd, callback);
+        }
+
+        /**
+         * Serves a polled read of one background task.
+         *
+         * @param handleId task handle returned by {@link #startShellBackground}
+         * @param offset output bytes already consumed by the caller
+         * @return the task snapshot; a finished-unknown snapshot for stale handles
+         */
+        @Override
+        public TerminalShellBackgroundState readShellBackground(long handleId, long offset) {
+            return backgroundTasks.read(handleId, offset);
+        }
+
+        /**
+         * Kills a background task and its whole guest process tree.
+         *
+         * @param handleId task handle
+         * @return true when the handle was known; false for a stale or unknown handle
+         */
+        @Override
+        public boolean killShellBackground(long handleId) {
+            return backgroundTasks.kill(handleId);
+        }
+
+        /**
+         * Frees the provider-side buffer of a finished background task.
+         *
+         * @param handleId task handle
+         */
+        @Override
+        public void forgetShellBackground(long handleId) {
+            backgroundTasks.forget(handleId);
         }
 
         /**
