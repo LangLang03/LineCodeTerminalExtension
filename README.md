@@ -6,7 +6,7 @@ LineCode 的独立终端提供者应用：内置 PRoot 与 Ubuntu 22.04.5 LTS（
 | 项目 | 值 |
 |---|---|
 | 包名 | `cn.lineai.terminal.extension` |
-| 版本 | 1.0.0（versionCode 1），见 `app/build.gradle.kts` 的 `releaseVersionName` |
+| 版本 | 1.1.0（versionCode 2），见 `app/build.gradle.kts` 的 `releaseVersionName` |
 | SDK | `minSdk 26` / `compileSdk 36` / `targetSdk 28`（见下文说明） |
 | 架构 | arm64-v8a（内置 PRoot 与 busybox 为 aarch64 二进制） |
 | 依赖 | 仅 Android 框架与 Java 11，无第三方运行时依赖 |
@@ -25,6 +25,7 @@ LineCode（IPC 调用方） → Binder: ITerminalProviderService → TerminalPro
   │   ├─ RootfsInstaller     解压 Ubuntu Base、写 overlay、维护安装标记
   │   │   └─ TarGzExtractor  流式解压，拒绝路径逃逸
   │   └─ ShellRunner         组装 PRoot argv 并执行 guest 命令
+  ├─ BackgroundGuestTasks    AIDL v2 后台 guest 任务：分离启动、输出缓冲、offset 轮询
   ├─ GuestFileSystem         AIDL 文件接口（分块读写、目录列举）
   │   └─ GuestPaths          guest 路径映射，符号链接限制在 rootfs 内
   └─ WorkerPool              进程级共享守护线程池
@@ -67,6 +68,10 @@ Service 声明（与 LineCode `:ipc` 的 AIDL 逐字复制以保持二进制兼�
 - `executeShell(command, cwd, timeoutMs, callback)` 同步返回退出码，输出经回调异步回传；
   文件接口覆盖 `readFile`/`writeFile`/`deleteFile`/`listDir`/`fileExists`/`fileSize`/
   `readFileChunk`/`writeFileChunk`/`getFileSize`/`listDirDetailed`；
+- 后台 Shell（AIDL v2）：`startShellBackground` 立即返回任务句柄并在 guest 内分离启动
+  （输出经回调流式回传，同时按 offset 保留在前缀缓冲中），`readShellBackground(handle, offset)`
+  轮询增量输出与运行状态，`killShellBackground` 终止整个 guest 进程树，
+  `forgetShellBackground` 释放提供方侧缓冲；环境未就绪时 start 返回 0；
 - 退出码约定：`>= 0` guest 退出码；`-1` 命令为空或启动失败；`-2` 超时（进程树已终止）；
   `-3` 环境未就绪。`cwd` 必须为 guest 绝对路径，`..` 在 guest 根处截断。
 

@@ -8,8 +8,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 将 guest Linux 路径（LineCode 经 IPC 使用的命名空间）映射为已解压 rootfs 内的宿主路径。
- * 符号链接按 guest 语义解析：绝对链接目标以 rootfs 为根，不会落到宿主文件系统。
+ * Maps guest Linux paths (the namespace used by LineCode over IPC) onto host
+ * paths inside the extracted rootfs. Symbolic links are resolved with guest
+ * semantics: absolute link targets are re-rooted at the rootfs, so resolution
+ * can never escape onto the host file system.
  */
 public final class GuestPaths {
 
@@ -17,17 +19,33 @@ public final class GuestPaths {
 
     private final File rootfs;
 
+    /**
+     * Creates a mapper rooted at the given rootfs directory.
+     *
+     * @param rootfsDir host directory of the extracted rootfs
+     */
     public GuestPaths(File rootfsDir) {
         this.rootfs = rootfsDir.getAbsoluteFile();
     }
 
+    /**
+     * Returns the rootfs base directory all resolutions are confined to.
+     *
+     * @return the rootfs directory
+     */
     public File rootfs() {
         return rootfs;
     }
 
     /**
-     * 规范化绝对 guest 路径：{@code ..} 在根处截断；相对路径与空路径直接拒绝，
-     * 因为 IPC 契约只传绝对路径。
+     * Normalizes an absolute guest path: {@code ..} components are clamped at
+     * the root. Relative and empty paths are rejected because the IPC contract
+     * only carries absolute paths.
+     *
+     * @param guestPath candidate absolute guest path
+     * @return the normalized absolute path
+     * @throws IllegalArgumentException when the path is relative or empty, or
+     *                                  contains a NUL character
      */
     public static String normalize(String guestPath) {
         if (guestPath == null || guestPath.isEmpty() || guestPath.charAt(0) != '/') {
@@ -59,7 +77,15 @@ public final class GuestPaths {
         return out.toString();
     }
 
-    /** 将 guest 路径解析为宿主文件，符号链接在 rootfs 内按 guest 语义虚拟解析。 */
+    /**
+     * Resolves a guest path to a host file, resolving symbolic links virtually
+     * within the rootfs according to guest semantics. The returned file may not
+     * exist yet.
+     *
+     * @param guestPath absolute guest path
+     * @return the mapped host path
+     * @throws IOException when the path traverses too many symbolic links
+     */
     public File resolve(String guestPath) throws IOException {
         String normalized = normalize(guestPath);
         ArrayDeque<String> pending = segments(normalized);
@@ -107,7 +133,13 @@ public final class GuestPaths {
     }
 
     /**
-     * 解析写入路径并创建缺失的父目录；创建后校验父目录仍位于 rootfs 内。
+     * Resolves a guest path for writing and creates missing parent directories;
+     * after creation the parent is re-verified to remain inside the rootfs.
+     *
+     * @param guestPath absolute guest path to resolve
+     * @return the mapped host file target
+     * @throws IOException when parent directories cannot be created or would
+     *                     leave the rootfs
      */
     public File resolveForWrite(String guestPath) throws IOException {
         File target = resolve(guestPath);
@@ -122,7 +154,13 @@ public final class GuestPaths {
         return target;
     }
 
-    /** 返回 rootfs 内宿主文件对应的 guest 路径；位于 rootfs 之外时返回 null。 */
+    /**
+     * Maps a host file back to its guest path.
+     *
+     * @param hostFile host file to map
+     * @return the corresponding guest path, or null when the file lies outside
+     *         the rootfs
+     */
     public String toGuest(File hostFile) {
         try {
             File canonicalRoot = rootfs.getCanonicalFile();
@@ -137,6 +175,7 @@ public final class GuestPaths {
         }
     }
 
+    /** Rejects paths whose canonical form escapes the rootfs boundary. */
     private void requireInsideRoot(File file) throws IOException {
         File canonicalRoot = rootfs.getCanonicalFile();
         String rootPath = canonicalRoot.getPath() + File.separator;
@@ -146,6 +185,7 @@ public final class GuestPaths {
         }
     }
 
+    /** Builds the host file for a candidate segment appended to the resolved prefix. */
     private File child(ArrayDeque<String> resolved, String part) {
         File result = rootfs;
         for (String component : resolved) {
@@ -154,6 +194,7 @@ public final class GuestPaths {
         return new File(result, part);
     }
 
+    /** Splits an absolute path into its non-empty segments. */
     private static ArrayDeque<String> segments(String absolutePath) {
         ArrayDeque<String> result = new ArrayDeque<>();
         for (String part : absolutePath.split("/")) {

@@ -14,12 +14,25 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 管理内置 PRoot 运行时与 Ubuntu rootfs 的生命周期。安装幂等且串行执行，
- * 可由 IPC 服务与状态页任意一方安全触发。
+ * Owns the lifecycle of the embedded PRoot runtime and the Ubuntu rootfs.
+ * Installation is idempotent and serialized behind an internal lock, so it is
+ * safe to trigger from both the IPC service and the status activity. Readiness
+ * and progress are published as monitor-guarded state, letting callers either
+ * poll the accessors or block in {@link #awaitReady(long)}.
  */
 public final class ProotEnvironment {
 
+    /**
+     * Receives coarse-grained installation progress.
+     */
     public interface Progress {
+
+        /**
+         * Reports progress toward a fully installed environment.
+         *
+         * @param percent completion percentage between 0 and 100
+         * @param message human-readable description of the current step
+         */
         void onProgress(int percent, String message);
     }
 
@@ -42,6 +55,11 @@ public final class ProotEnvironment {
     private volatile String message = "";
     private volatile String lastError;
 
+    /**
+     * Creates the environment bound to the application context.
+     *
+     * @param context context resolved to its application instance
+     */
     public ProotEnvironment(Context context) {
         this.context = context.getApplicationContext();
         this.paths = new RuntimePaths(this.context.getFilesDir());
@@ -50,18 +68,38 @@ public final class ProotEnvironment {
         this.shell = new ShellRunner(paths);
     }
 
+    /**
+     * Returns the runtime path layout.
+     *
+     * @return the shared path layout
+     */
     public RuntimePaths paths() {
         return paths;
     }
 
+    /**
+     * Returns the guest file facade backing the AIDL file operations.
+     *
+     * @return the guest file facade
+     */
     public GuestFileSystem files() {
         return files;
     }
 
+    /**
+     * Returns the guest command executor.
+     *
+     * @return the shell runner
+     */
     public ShellRunner shellRunner() {
         return shell;
     }
 
+    /**
+     * Checks whether the device can execute the embedded arm64 PRoot binary.
+     *
+     * @return true when the device reports an {@code arm64-v8a} ABI
+     */
     public boolean isArm64() {
         for (String abi : Build.SUPPORTED_ABIS) {
             if ("arm64-v8a".equals(abi)) {
@@ -71,6 +109,12 @@ public final class ProotEnvironment {
         return false;
     }
 
+    /**
+     * Reports readiness; the in-memory flag and the on-disk rootfs marker must
+     * both agree so a wiped installation is never reported as usable.
+     *
+     * @return true when the guest environment is installed and usable
+     */
     public boolean isReady() {
         synchronized (stateLock) {
             if (!ready) {
@@ -80,48 +124,96 @@ public final class ProotEnvironment {
         return installer.isInstalled();
     }
 
+    /**
+     * Reports whether an installation is currently running.
+     *
+     * @return true while an install is in progress
+     */
     public boolean isInstalling() {
         synchronized (stateLock) {
             return installing;
         }
     }
 
+    /**
+     * Returns the current installation percentage.
+     *
+     * @return progress percentage between 0 and 100
+     */
     public int progressPercent() {
         synchronized (stateLock) {
             return percent;
         }
     }
 
+    /**
+     * Returns the description of the current installation step.
+     *
+     * @return current progress message, empty when none
+     */
     public String progressMessage() {
         synchronized (stateLock) {
             return message;
         }
     }
 
+    /**
+     * Returns the last fatal installation error.
+     *
+     * @return error description, or null when no failure has occurred
+     */
     public String lastError() {
         synchronized (stateLock) {
             return lastError;
         }
     }
 
+    /**
+     * Returns the total on-disk size of the installed rootfs.
+     *
+     * @return size in bytes
+     */
     public long installedSizeBytes() {
         return installer.installedSizeBytes();
     }
 
+    /**
+     * Returns the provider descriptor JSON document.
+     *
+     * @return the JSON document served by {@code getProviderInfo()}
+     */
     public String providerInfoJson() {
         return ProviderInfo.json(paths.homePath());
     }
 
-    /** 阻塞式安装；环境已就绪时立即返回。 */
+    /**
+     * Installs the environment if necessary and blocks until done; returns
+     * immediately when the environment is already ready.
+     *
+     * @param listener optional progress listener
+     * @throws IOException when runtime assets cannot be written or the image
+     *                     fails verification
+     */
     public void ensureInstalled(Progress listener) throws IOException {
         install(false, listener);
     }
 
-    /** 显式重装；保留 /root/workspace 下的内容。 */
+    /**
+     * Forces a full re-extraction of the image; the contents of
+     * {@code /root/workspace} are preserved across the swap.
+     *
+     * @param listener optional progress listener
+     * @throws IOException when the reinstall fails
+     */
     public void reinstall(Progress listener) throws IOException {
         install(true, listener);
     }
 
+    /**
+     * Schedules installation on the shared worker pool unless the environment
+     * is already ready or an install is running; failures are recorded in
+     * {@link #lastError()} for the status activity.
+     */
     public void startBackgroundInstall() {
         synchronized (stateLock) {
             if (ready || installing) {
@@ -132,11 +224,19 @@ public final class ProotEnvironment {
             try {
                 ensureInstalled(null);
             } catch (IOException error) {
-                // 失败状态已记录，由状态页展示。
+                // The failure state is recorded in lastError and shown by the
+                // status activity.
             }
         });
     }
 
+    /**
+     * Blocks until the environment is ready, the installation fails or the
+     * timeout elapses; kicks off a background install when none is running.
+     *
+     * @param timeoutMs maximum wait duration; zero or negative disables waiting
+     * @return true when ready, false on timeout, failure or interruption
+     */
     public boolean awaitReady(long timeoutMs) {
         long deadline = System.currentTimeMillis() + Math.max(0L, timeoutMs);
         synchronized (stateLock) {
@@ -162,6 +262,7 @@ public final class ProotEnvironment {
         }
     }
 
+    /** Serialized install entry point; see {@link #ensureInstalled} and {@link #reinstall}. */
     private void install(boolean force, Progress listener) throws IOException {
         synchronized (installLock) {
             synchronized (stateLock) {
@@ -208,6 +309,7 @@ public final class ProotEnvironment {
         }
     }
 
+    /** Re-writes guest network configuration for the current DNS servers; best-effort. */
     private void refreshNetworkConfig() {
         try {
             RootfsOverlay.refreshNetwork(context, paths.rootfsDir(), dnsServers());
@@ -216,6 +318,7 @@ public final class ProotEnvironment {
         }
     }
 
+    /** Copies PRoot binaries and libraries from assets into the runtime directory. */
     private void copyProotRuntime(Progress listener) throws IOException {
         mkdirs(paths.baseDir());
         mkdirs(paths.prootLibDir());
@@ -228,6 +331,7 @@ public final class ProotEnvironment {
         update(5, "PRoot 运行时已就绪", listener);
     }
 
+    /** Copies one asset and applies the requested POSIX permission bits. */
     private void copyAsset(String assetPath, File target, int mode) throws IOException {
         mkdirs(target.getParentFile());
         try (InputStream in = context.getAssets().open(assetPath);
@@ -251,6 +355,7 @@ public final class ProotEnvironment {
         }
     }
 
+    /** Publishes install progress and wakes threads waiting in {@link #awaitReady}. */
     private void update(int newPercent, String newMessage, Progress listener) {
         synchronized (stateLock) {
             percent = Math.max(0, Math.min(100, newPercent));
@@ -260,12 +365,21 @@ public final class ProotEnvironment {
         report(listener, percent, message);
     }
 
+    /** Invokes the listener when present. */
     private void report(Progress listener, int value, String text) {
         if (listener != null) {
             listener.onProgress(value, text);
         }
     }
 
+    /**
+     * Collects the IPv4 DNS servers of the active network, falling back to
+     * public resolvers when unavailable. IPv6 servers are dropped because the
+     * container network stack has no reliable IPv6 connectivity and IPv6
+     * resolvers make apt and curl fail immediately.
+     *
+     * @return deduplicated IPv4 resolver addresses
+     */
     public List<String> dnsServers() {
         List<String> result = new ArrayList<>();
         try {
@@ -290,7 +404,7 @@ public final class ProotEnvironment {
                 }
             }
         } catch (RuntimeException error) {
-            // 无 ACCESS_NETWORK_STATE 权限或无活动网络时，使用回退 DNS。
+            // Without ACCESS_NETWORK_STATE or an active network, use fallback DNS.
         }
         if (result.isEmpty()) {
             result.add("223.5.5.5");
@@ -300,12 +414,14 @@ public final class ProotEnvironment {
         return result;
     }
 
+    /** Creates a directory, tolerating concurrent creation. */
     private static void mkdirs(File dir) throws IOException {
         if (dir != null && !dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {
             throw new IOException("Cannot create directory: " + dir);
         }
     }
 
+    /** Returns the message of a throwable, falling back to its string form. */
     private static String describe(Throwable error) {
         String text = error.getMessage();
         return text == null || text.isEmpty() ? error.toString() : text;

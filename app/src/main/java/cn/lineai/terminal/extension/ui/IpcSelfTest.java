@@ -17,20 +17,39 @@ import cn.lineai.ipc.terminal.ITerminalProviderService;
 import cn.lineai.terminal.extension.runtime.ProviderInfo;
 
 /**
- * LineCode IPC 契约的端上自检：通过 provider action 发现服务、绑定导出的 Service，
- * 随后读取 providerInfo 并执行一次 guest 文件查询。
+ * On-device self-test of the LineCode IPC contract: discovers the provider
+ * service by its action, binds the exported service, then reads the provider
+ * descriptor and issues guest file queries. The result is rendered as a
+ * multi-line report consumed by the status activity log.
  */
 final class IpcSelfTest {
 
+    /**
+     * Receives the completed self-test report.
+     */
     interface Callback {
+
+        /**
+         * Delivers the full self-test report.
+         *
+         * @param text multi-line report text
+         */
         void onResult(String text);
     }
 
     private static final String ACTION = "cn.lineai.action.IPC_TERMINAL_PROVIDER";
 
+    /** Suppresses instantiation; all members are static. */
     private IpcSelfTest() {
     }
 
+    /**
+     * Runs the self-test on the given executor and reports asynchronously.
+     *
+     * @param context context used for service discovery and binding
+     * @param workers executor running the probe off the main thread
+     * @param callback receiver of the report text
+     */
     static void run(Context context, ExecutorService workers, Callback callback) {
         workers.submit(() -> {
             StringBuilder out = new StringBuilder();
@@ -62,16 +81,22 @@ final class IpcSelfTest {
         });
     }
 
+    /**
+     * Binds the provider service, issues read-only probe calls and always
+     * unbinds before returning; appends probe results to the report buffer.
+     */
     private static String bindAndProbe(Context context, StringBuilder out) throws RuntimeException {
         CountDownLatch latch = new CountDownLatch(1);
         final IBinder[] binder = new IBinder[1];
         ServiceConnection connection = new ServiceConnection() {
+            /** Records the binder and releases the waiter. */
             @Override
             public void onServiceConnected(ComponentName name, IBinder service) {
                 binder[0] = service;
                 latch.countDown();
             }
 
+            /** Releases the waiter; the probe then reports a failure. */
             @Override
             public void onServiceDisconnected(ComponentName name) {
                 latch.countDown();
@@ -115,6 +140,7 @@ final class IpcSelfTest {
         }
     }
 
+    /** Returns the message of a throwable, falling back to its string form. */
     private static String describe(Throwable error) {
         String message = error.getMessage();
         return message == null || message.isEmpty() ? error.toString() : message;

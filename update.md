@@ -1,5 +1,33 @@
 # Changelog / 更新日志
 
+## v1.1.0
+
+### English
+
+#### AIDL v2 background shell
+
+- **Background guest tasks** - the provider now implements the v2 surface of `ITerminalProviderService` copied verbatim from LineCode `:ipc`: `startShellBackground` launches a guest command detached through PRoot and returns a handle immediately, `readShellBackground(handle, offset)` serves polled incremental reads against a contiguous prefix buffer (512 K character cap, prefix kept so offset semantics stay stable), `killShellBackground` terminates the whole guest process tree through the `/proc` walker, and `forgetShellBackground` frees the provider-side buffer. The AIDL copy ships the new `TerminalShellBackgroundState` parcelable.
+- **Contract details** - output streams to the IPC callback and is retained for polling at the same time; the service waits for the Ubuntu environment (up to 180 s) before launching and returns 0 when it never became ready, -1 for empty commands or spawn failures; `getProviderInfo()` now reports `version` 1.1.0 with the `backgroundShell` capability.
+- **Service teardown** - destroying the provider service kills every still-running background task.
+
+#### Tests and release
+
+- New `BackgroundGuestTasksTest` drives the pump/buffer/kill lifecycle with a scripted `Process` double: offset-addressed reads, streamed callback delivery, kill semantics, stale handles and the buffer cap. `ProviderInfoTest` asserts the new version and capability.
+- Version `1.1.0` (versionCode 2); the release workflow publishes the signed APK on merge.
+
+### 中文
+
+#### AIDL v2 后台 Shell
+
+- **后台 guest 任务** - 提供方现在实现从 LineCode `:ipc` 逐字复制的 `ITerminalProviderService` v2 接口：`startShellBackground` 经 PRoot 分离启动 guest 命令并立即返回句柄，`readShellBackground(handle, offset)` 基于连续前缀缓冲（512 K 字符上限，保留前缀使 offset 语义稳定）提供按偏移的轮询读取，`killShellBackground` 经 `/proc` 遍历终止整个 guest 进程树，`forgetShellBackground` 释放提供方侧缓冲。AIDL 副本新增 `TerminalShellBackgroundState` parcelable。
+- **契约细节** - 输出同时流式回传给回调并保留用于轮询；启动前等待 Ubuntu 环境就绪（最长 180 秒），未就绪返回 0，空命令或启动失败返回 -1；`getProviderInfo()` 现在报告 `version` 1.1.0 与 `backgroundShell` 能力。
+- **服务销毁** - provider service 销毁时终止所有仍在运行的后台任务。
+
+#### 测试与发布
+
+- 新增 `BackgroundGuestTasksTest`：以脚本化的 `Process` 测试替身驱动 pump/缓冲/kill 全链路——按偏移读取、回调流式投递、kill 语义、过期句柄与缓冲上限；`ProviderInfoTest` 断言新版本号与能力。
+- 版本号 `1.1.0`（versionCode 2）；Release 工作流在合并后发布签名 APK。
+
 ## v1.0.0
 
 ### English

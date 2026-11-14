@@ -5,7 +5,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** 进程级共享守护线程池，供 shell 执行、解压与状态页任务使用。 */
+/**
+ * Process-wide daemon executor shared by shell execution, archive extraction and
+ * status page tasks. Daemon threads keep VM exit unblocked regardless of the
+ * components that submitted work.
+ */
 public final class WorkerPool {
 
     private static final ExecutorService SHARED;
@@ -21,9 +25,15 @@ public final class WorkerPool {
         SHARED = Executors.newCachedThreadPool(factory);
     }
 
+    /** Suppresses instantiation; the pool is process-wide and static. */
     private WorkerPool() {
     }
 
+    /**
+     * Returns the shared executor.
+     *
+     * @return a cached thread pool of named daemon worker threads
+     */
     public static ExecutorService shared() {
         return SHARED;
     }

@@ -1,11 +1,23 @@
 package cn.lineai.terminal.extension.runtime;
 
-/** 最小 JSON 字符串转义，用于本应用自行拼装的小型报文。 */
+/**
+ * Minimal JSON string escaping for the small documents this application
+ * assembles itself. Covers the escape set required for well-formed JSON string
+ * values; remaining control characters are emitted as {@code \\uXXXX} sequences.
+ */
 public final class Json {
 
+    /** Suppresses instantiation; all members are static. */
     private Json() {
     }
 
+    /**
+     * Quotes a value as a JSON string literal, escaping quotes, backslashes and
+     * control characters; a {@code null} value maps to the literal {@code null}.
+     *
+     * @param value value to quote
+     * @return the quoted JSON representation, or {@code "null"} for a null input
+     */
     public static String quote(String value) {
         if (value == null) {
             return "null";
