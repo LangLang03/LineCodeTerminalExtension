@@ -12,6 +12,13 @@
     <string name="status_paths">安装位置：%1$s</string>
     <string name="status_proot">PRoot：%1$s</string>
     <string name="status_size">占用空间：%1$s</string>
+    <string name="status_external_title">外部文件访问</string>
+    <string name="status_external_granted">已获得设备共享存储访问权限；guest 内通过 /sdcard、/storage/emulated/0 或 /root/sdcard 读写手机文件。</string>
+    <string name="status_external_missing">未获得共享存储访问权限，guest 无法读写手机文件。</string>
+    <string name="status_external_grant">授权存储访问</string>
+    <string name="status_external_settings">打开系统设置</string>
+    <string name="status_external_granted_log">已获得外部存储访问权限</string>
+    <string name="status_external_denied_log">未获得外部存储访问权限；可在系统设置中手动授予。</string>
     <string name="status_install">安装 / 重新安装</string>
     <string name="status_test">运行测试命令</string>
     <string name="status_clear_log">清空日志</string>

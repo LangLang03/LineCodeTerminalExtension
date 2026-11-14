@@ -1,5 +1,35 @@
 # Changelog / 更新日志
 
+## v1.2.0
+
+### English
+
+#### External file access
+
+- **Shared storage bridge** - the provider now requests `READ_EXTERNAL_STORAGE` / `WRITE_EXTERNAL_STORAGE` and opts into legacy external storage (API 28), then bind-mounts the host volume `/storage/emulated/0` into the guest at `/sdcard`, `/storage/emulated/0` and `/root/sdcard`. LineCode external project paths therefore work unchanged inside Ubuntu.
+- **One namespace for shell and file APIs** - foreground/background shell commands and the AIDL file operations share the same guest path mapper. Shared-storage paths are containment-checked, symlinks that escape the volume are rejected, and an ungranted permission leaves the mount points empty so operations fail closed instead of touching unexpected host paths.
+- **Status page** - new "External file access" section with a grant button; when the runtime dialog is exhausted the button opens the application settings page. A grant takes effect on the next command without reinstalling the environment.
+- **Provider descriptor** - `getProviderInfo()` reports version 1.2.0, the `/sdcard` and `/storage/emulated/0` mappings, `/root/sdcard`, and an `externalStorage` capability.
+
+#### Tests and release
+
+- 35 unit tests (new: shared-storage mapping and escape rejection, file-system access through the shared volume, shell bind assembly, mount-point creation, provider descriptor fields).
+- Version `1.2.0` (versionCode 3); the release workflow publishes the signed APK on merge.
+
+### 中文
+
+#### 外部文件访问
+
+- **共享存储桥接** - 提供方申请 `READ_EXTERNAL_STORAGE` / `WRITE_EXTERNAL_STORAGE` 并以 API 28 的 legacy external storage 方式访问设备共享存储，随后把宿主 `/storage/emulated/0` 绑定到 guest 的 `/sdcard`、`/storage/emulated/0` 与 `/root/sdcard`。LineCode 的外部项目绝对路径因此可以在 Ubuntu 内直接使用。
+- **Shell 与文件接口共用命名空间** - 前台/后台 Shell 命令与 AIDL 文件操作使用同一套 guest 路径映射；共享存储路径同样做边界校验，逃逸该卷的符号链接会被拒绝；未授权时挂载点保持为空，操作失败而不会访问意外的宿主路径。
+- **状态页** - 新增「外部文件访问」区域与授权按钮；系统不再显示授权对话框时按钮改为打开应用设置页。授权后无需重装环境，下一条命令即生效。
+- **提供方描述** - `getProviderInfo()` 报告版本 1.2.0、`/sdcard` 与 `/storage/emulated/0` 映射、`/root/sdcard` 以及 `externalStorage` 能力。
+
+#### 测试与发布
+
+- 35 个单元测试（新增：共享存储映射与逃逸拒绝、经共享卷的文件系统访问、Shell 绑定参数、挂载点创建、提供方描述字段）。
+- 版本号 `1.2.0`（versionCode 3）；Release 工作流在合并后发布签名 APK。
+
 ## v1.1.0
 
 ### English

@@ -57,6 +57,7 @@ final class RootfsOverlay {
             throws IOException {
         report(progress, 0, "配置网络与软件源");
         refreshNetwork(context, rootfs, dnsServers);
+        ensureExternalMountPoints(rootfs);
         writeText(new File(rootfs, "etc/profile.d/linecode.sh"), PROFILE);
         writeText(new File(rootfs, "root/.bashrc"), BASHRC);
         writeText(new File(rootfs, "root/.profile"), PROFILE);
@@ -90,6 +91,19 @@ final class RootfsOverlay {
         report(progress, 80, "写入环境配置");
         mkdirs(new File(rootfs, "root/.config"));
         report(progress, 100, "环境配置完成");
+    }
+
+    /**
+     * Creates the guest directories that later receive the shared-storage bind mounts.
+     * Idempotent and safe to call for an already installed rootfs.
+     *
+     * @param rootfs host directory of the extracted rootfs
+     * @throws IOException when a mount point directory cannot be created
+     */
+    static void ensureExternalMountPoints(File rootfs) throws IOException {
+        mkdirs(new File(rootfs, "sdcard"));
+        mkdirs(new File(rootfs, "storage/emulated/0"));
+        mkdirs(new File(rootfs, "root/sdcard"));
     }
 
     /**

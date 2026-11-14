@@ -8,7 +8,7 @@ package cn.lineai.terminal.extension.runtime;
 public final class ProviderInfo {
 
     public static final String NAME = "LineCode Terminal Extension";
-    public static final String VERSION = "1.1.0";
+    public static final String VERSION = "1.2.0";
     public static final String DISTRO = "Ubuntu 22.04.5 LTS (jammy)";
     public static final String ARCH = "aarch64";
     public static final String SHELL = "/bin/bash";
@@ -30,6 +30,10 @@ public final class ProviderInfo {
                 + ",\"home\":" + Json.quote(homePath)
                 + ",\"distro\":" + Json.quote(DISTRO)
                 + ",\"arch\":" + Json.quote(ARCH)
+                + ",\"externalStorage\":["
+                + Json.quote(ExternalStorage.GUEST_SDCARD) + ","
+                + Json.quote(ExternalStorage.GUEST_ANDROID_ROOT) + "]"
+                + ",\"externalHome\":" + Json.quote(ExternalStorage.GUEST_HOME_LINK)
                 + ",\"capabilities\":["
                 + "\"executeShell\","
                 + "\"backgroundShell\","
@@ -42,6 +46,7 @@ public final class ProviderInfo {
                 + "\"readFileChunk\","
                 + "\"writeFileChunk\","
                 + "\"getFileSize\","
-                + "\"listDirDetailed\"]}";
+                + "\"listDirDetailed\","
+                + "\"externalStorage\"]}";
     }
 }

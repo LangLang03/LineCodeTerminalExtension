@@ -44,6 +44,8 @@ public final class ProotEnvironment {
     private final Context context;
     private final RuntimePaths paths;
     private final RootfsInstaller installer;
+    private final ExternalStorage externalStorage;
+    private final GuestPaths guestPaths;
     private final GuestFileSystem files;
     private final ShellRunner shell;
 
@@ -64,8 +66,22 @@ public final class ProotEnvironment {
         this.context = context.getApplicationContext();
         this.paths = new RuntimePaths(this.context.getFilesDir());
         this.installer = new RootfsInstaller(this.context, paths);
-        this.files = new GuestFileSystem(paths.rootfsDir(), paths.homePath());
-        this.shell = new ShellRunner(paths);
+        this.externalStorage = new ExternalStorage(this.context);
+        this.guestPaths = new GuestPaths(paths.rootfsDir(),
+                () -> externalStorage.mountRoot());
+        this.files = new GuestFileSystem(guestPaths, paths.homePath());
+        this.shell = new ShellRunner(paths,
+                () -> externalStorage.mountRoot());
+    }
+
+    /**
+     * Returns the host-side shared storage accessor; the status page uses it to show the
+     * permission state and the guest mount paths.
+     *
+     * @return the shared storage accessor
+     */
+    public ExternalStorage externalStorage() {
+        return externalStorage;
     }
 
     /**
@@ -313,8 +329,10 @@ public final class ProotEnvironment {
     private void refreshNetworkConfig() {
         try {
             RootfsOverlay.refreshNetwork(context, paths.rootfsDir(), dnsServers());
-        } catch (IOException ignored) {
-            // Network configuration is best-effort; the environment itself stays usable.
+            RootfsOverlay.ensureExternalMountPoints(paths.rootfsDir());
+        } catch (IOException error) {
+            // Guest configuration is best-effort; the environment itself stays usable.
+            System.err.println("guest configuration refresh failed: " + error.getMessage());
         }
     }
 

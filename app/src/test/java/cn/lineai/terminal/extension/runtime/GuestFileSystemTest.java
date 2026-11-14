@@ -94,6 +94,23 @@ public class GuestFileSystemTest {
     }
 
     @Test
+    public void readsAndWritesSharedStorageThroughTheGuestMapper() throws Exception {
+        File external = Files.createTempDirectory("guest-fs-ext").toFile();
+        GuestFileSystem shared = new GuestFileSystem(
+                new GuestPaths(rootfs, () -> external), "/root/workspace");
+        assertTrue(shared.writeFile("/sdcard/Download/out.txt", bytes("shared")));
+        File host = new File(external, "Download/out.txt");
+        assertTrue(host.isFile());
+        assertEquals("shared", new String(Files.readAllBytes(host.toPath()),
+                StandardCharsets.UTF_8));
+        assertArrayEquals(bytes("shared"), shared.readFile("/storage/emulated/0/Download/out.txt"));
+        assertTrue(shared.fileExists("/sdcard/Download/out.txt"));
+        assertEquals(1, shared.listDir("/sdcard/Download").length);
+        assertTrue(shared.deleteFile("/sdcard/Download/out.txt"));
+        assertFalse(host.exists());
+    }
+
+    @Test
     public void symlinksAreResolvedInsideTheRootfs() throws Exception {
         Files.createDirectories(new File(rootfs, "usr/bin").toPath());
         try (FileOutputStream out = new FileOutputStream(new File(rootfs, "usr/bin/tool"))) {

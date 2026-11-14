@@ -5,7 +5,7 @@ plugins {
 import java.util.Properties
 
 // Public version; the release workflow reads both values to decide whether to publish.
-val releaseVersionName = "1.1.0"
+val releaseVersionName = "1.2.0"
 
 val embeddedRuntimeDir = layout.projectDirectory.dir("src/main/assets/runtime")
 val requiredRuntimeAssets = listOf(
@@ -52,7 +52,7 @@ android {
         // PRoot executes guest binaries from the app data directory. Android 10+ blocks
         // that for apps targeting API 29+, so this extension intentionally stays at 28.
         targetSdk = 28
-        versionCode = 2
+        versionCode = 3
         versionName = releaseVersionName
     }
 

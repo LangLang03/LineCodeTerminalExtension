@@ -1,5 +1,6 @@
 package cn.lineai.terminal.extension.runtime;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -10,6 +11,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /**
  * Executes commands inside the PRoot guest through {@code /bin/bash}. Each
@@ -49,15 +51,28 @@ public final class ShellRunner {
     private static final long MAX_TIMEOUT_MS = 30L * 60L * 1000L;
 
     private final RuntimePaths paths;
+    private final Supplier<File> externalRoot;
     private final ExecutorService workers = WorkerPool.shared();
 
     /**
-     * Creates a runner bound to the given runtime layout.
+     * Creates a runner bound to the given runtime layout without shared-storage mounts.
      *
      * @param paths runtime path layout providing binary and rootfs locations
      */
     public ShellRunner(RuntimePaths paths) {
+        this(paths, null);
+    }
+
+    /**
+     * Creates a runner that bind-mounts the host shared volume into the guest whenever the
+     * supplier returns a usable directory.
+     *
+     * @param paths runtime path layout providing binary and rootfs locations
+     * @param externalRoot supplier of the shared storage root, or {@code null}
+     */
+    public ShellRunner(RuntimePaths paths, Supplier<File> externalRoot) {
         this.paths = paths;
+        this.externalRoot = externalRoot;
     }
 
     /**
@@ -86,6 +101,7 @@ public final class ShellRunner {
         argv.add("/sys");
         argv.add("-b");
         argv.add("/dev/urandom:/dev/random");
+        addExternalBinds(argv);
         argv.add("-w");
         argv.add(guestCwd);
         argv.add("/usr/bin/env");
@@ -100,6 +116,35 @@ public final class ShellRunner {
         argv.add("-lc");
         argv.add(command == null ? "" : command);
         return argv;
+    }
+
+    /**
+     * Adds shared-storage bind mounts when the device permission is granted; the
+     * guest then sees the same volume at {@code /sdcard}, {@code /storage/emulated/0}
+     * and {@code /root/sdcard}.
+     *
+     * @param argv argv under construction
+     */
+    private void addExternalBinds(List<String> argv) {
+        File external = externalRoot == null ? null : externalRoot.get();
+        if (external == null || !external.isDirectory()) {
+            return;
+        }
+        String path = external.getAbsolutePath();
+        addBind(argv, path + ":" + ExternalStorage.GUEST_SDCARD);
+        addBind(argv, path + ":" + ExternalStorage.GUEST_ANDROID_ROOT);
+        addBind(argv, path + ":" + ExternalStorage.GUEST_HOME_LINK);
+    }
+
+    /**
+     * Appends one {@code -b host:guest} mapping.
+     *
+     * @param argv argv under construction
+     * @param mapping host-to-guest bind specification
+     */
+    private static void addBind(List<String> argv, String mapping) {
+        argv.add("-b");
+        argv.add(mapping);
     }
 
     /**

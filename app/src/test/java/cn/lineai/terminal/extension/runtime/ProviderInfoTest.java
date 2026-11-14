@@ -10,12 +10,14 @@ public class ProviderInfoTest {
     public void describesTheUbuntuGuestForLineCode() {
         String json = ProviderInfo.json("/root/workspace");
         assertTrue(json.contains("\"name\":\"LineCode Terminal Extension\""));
-        assertTrue(json.contains("\"version\":\"1.1.0\""));
+        assertTrue(json.contains("\"version\":\"1.2.0\""));
         assertTrue(json.contains("\"shell\":\"/bin/bash\""));
         assertTrue(json.contains("\"home\":\"/root/workspace\""));
         assertTrue(json.contains("\"arch\":\"aarch64\""));
         assertTrue(json.contains("\"executeShell\""));
         assertTrue(json.contains("\"backgroundShell\""));
+        assertTrue(json.contains("\"externalStorage\""));
+        assertTrue(json.contains("\"externalHome\""));
         assertTrue(json.contains("\"readFileChunk\""));
         assertTrue(json.contains("\"listDirDetailed\""));
     }

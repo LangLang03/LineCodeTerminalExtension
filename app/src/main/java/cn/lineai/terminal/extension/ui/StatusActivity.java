@@ -1,11 +1,17 @@
 package cn.lineai.terminal.extension.ui;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Typeface;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
@@ -43,6 +49,8 @@ public final class StatusActivity extends Activity {
      */
     public static final String EXTRA_AUTO_INSTALL = "auto_install";
 
+    private static final int REQUEST_EXTERNAL_STORAGE = 41;
+
     private ProotEnvironment environment;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -52,11 +60,14 @@ public final class StatusActivity extends Activity {
     private TextView prootView;
     private TextView sizeView;
     private TextView abiView;
+    private TextView externalView;
+    private Button externalButton;
     private TextView logView;
     private ScrollView logScroll;
     private ProgressBar progressBar;
     private Button installButton;
     private boolean testRunning;
+    private boolean externalPermissionAsked;
 
     private final Runnable poll = new Runnable() {
         /** Repaints the environment state and reschedules itself at a fixed interval. */
@@ -173,6 +184,29 @@ public final class StatusActivity extends Activity {
         sizeView.setTextColor(0xFF444444);
         root.addView(sizeView, new LinearLayout.LayoutParams(-1, -2));
 
+        TextView externalTitle = new TextView(this);
+        externalTitle.setText(R.string.status_external_title);
+        externalTitle.setTextSize(13f);
+        externalTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        LinearLayout.LayoutParams externalTitleParams = new LinearLayout.LayoutParams(-1, -2);
+        externalTitleParams.topMargin = dp(16);
+        root.addView(externalTitle, externalTitleParams);
+
+        externalView = new TextView(this);
+        externalView.setTextSize(12f);
+        externalView.setTextColor(0xFF444444);
+        externalView.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams externalParams = new LinearLayout.LayoutParams(-1, -2);
+        externalParams.topMargin = dp(4);
+        root.addView(externalView, externalParams);
+
+        externalButton = new Button(this);
+        externalButton.setText(R.string.status_external_grant);
+        externalButton.setOnClickListener(v -> onExternalAccessClicked());
+        LinearLayout.LayoutParams externalButtonParams = new LinearLayout.LayoutParams(-1, -2);
+        externalButtonParams.topMargin = dp(8);
+        root.addView(externalButton, externalButtonParams);
+
         abiView = new TextView(this);
         abiView.setTextSize(12f);
         abiView.setTextColor(0xFFB3261E);
@@ -279,6 +313,82 @@ public final class StatusActivity extends Activity {
                         : getString(R.string.size_unknown)));
         abiView.setText(environment.isArm64() ? "" : getString(R.string.status_abi_missing));
         installButton.setEnabled(!installing);
+        renderExternalAccess();
+    }
+
+    /** Shows whether the guest can read and write the device shared storage. */
+    private void renderExternalAccess() {
+        boolean granted = externalStorageAvailable();
+        externalView.setText(granted
+                ? R.string.status_external_granted
+                : R.string.status_external_missing);
+        externalView.setTextColor(granted ? 0xFF2E7D32 : 0xFFB3261E);
+        externalButton.setVisibility(granted ? View.GONE : View.VISIBLE);
+        boolean canAsk = canRequestExternalStorage();
+        externalButton.setText(canAsk
+                ? R.string.status_external_grant
+                : R.string.status_external_settings);
+    }
+
+    /** Whether the provider currently sees the shared storage volume. */
+    private boolean externalStorageAvailable() {
+        return environment.externalStorage().available();
+    }
+
+    /** Whether a runtime permission dialog can still be shown for shared storage. */
+    private boolean canRequestExternalStorage() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return false;
+        }
+        if (!externalPermissionAsked) {
+            return true;
+        }
+        return shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE)
+                || shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+    }
+
+    /** Requests shared storage access or opens app settings when the dialog is exhausted. */
+    private void onExternalAccessClicked() {
+        if (externalStorageAvailable()) {
+            render();
+            return;
+        }
+        if (canRequestExternalStorage()) {
+            externalPermissionAsked = true;
+            requestPermissions(new String[] {
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+            }, REQUEST_EXTERNAL_STORAGE);
+            return;
+        }
+        openAppSettings();
+    }
+
+    /** Opens this application's system settings page for manual permission grants. */
+    private void openAppSettings() {
+        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + getPackageName()));
+        startActivity(intent);
+    }
+
+    /**
+     * Refreshes the external-storage state after the permission result arrives.
+     *
+     * @param requestCode identifier of the requested permission group
+     * @param permissions requested permission names
+     * @param grantResults grant results in request order
+     */
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                                           int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_EXTERNAL_STORAGE) {
+            return;
+        }
+        boolean granted = externalStorageAvailable();
+        appendLog(granted ? getString(R.string.status_external_granted_log)
+                : getString(R.string.status_external_denied_log));
+        render();
     }
 
     /** Guards installation triggers and asks for confirmation before a reinstall. */

@@ -31,7 +31,18 @@ public final class GuestFileSystem {
      * @param homePath guest home directory used as the default for listing
      */
     public GuestFileSystem(File rootfsDir, String homePath) {
-        this.paths = new GuestPaths(rootfsDir);
+        this(new GuestPaths(rootfsDir), homePath);
+    }
+
+    /**
+     * Creates the facade over an explicit path mapper, including optional shared-storage
+     * mounts.
+     *
+     * @param paths guest-to-host path mapper
+     * @param homePath guest home directory used as the default for listing
+     */
+    public GuestFileSystem(GuestPaths paths, String homePath) {
+        this.paths = paths;
         this.home = homePath;
     }
 

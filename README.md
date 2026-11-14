@@ -6,7 +6,7 @@ LineCode 的独立终端提供者应用：内置 PRoot 与 Ubuntu 22.04.5 LTS（
 | 项目 | 值 |
 |---|---|
 | 包名 | `cn.lineai.terminal.extension` |
-| 版本 | 1.1.0（versionCode 2），见 `app/build.gradle.kts` 的 `releaseVersionName` |
+| 版本 | 1.2.0（versionCode 3），见 `app/build.gradle.kts` 的 `releaseVersionName` |
 | SDK | `minSdk 26` / `compileSdk 36` / `targetSdk 28`（见下文说明） |
 | 架构 | arm64-v8a（内置 PRoot 与 busybox 为 aarch64 二进制） |
 | 依赖 | 仅 Android 框架与 Java 11，无第三方运行时依赖 |
@@ -27,7 +27,8 @@ LineCode（IPC 调用方） → Binder: ITerminalProviderService → TerminalPro
   │   └─ ShellRunner         组装 PRoot argv 并执行 guest 命令
   ├─ BackgroundGuestTasks    AIDL v2 后台 guest 任务：分离启动、输出缓冲、offset 轮询
   ├─ GuestFileSystem         AIDL 文件接口（分块读写、目录列举）
-  │   └─ GuestPaths          guest 路径映射，符号链接限制在 rootfs 内
+  │   └─ GuestPaths          guest 路径映射，符号链接限制在各挂载根内
+  ├─ ExternalStorage         设备共享存储访问：/sdcard、/storage/emulated/0 绑定到 guest
   └─ WorkerPool              进程级共享守护线程池
 ```
 
@@ -41,7 +42,8 @@ LineCode（IPC 调用方） → Binder: ITerminalProviderService → TerminalPro
 busybox-static（Ubuntu ports）、CA 证书包（curl.se）。
 
 首次绑定服务时自动安装：解压约 95 MB 根文件系统（数十秒），并写入 DNS（仅 IPv4）、
-APT sandbox 配置、shell profile、busybox 符号链接与 CA 证书。安装幂等；重新安装保留
+APT sandbox 配置、shell profile、busybox 符号链接与 CA 证书，同时创建共享存储挂载点
+`/sdcard`、`/storage/emulated/0`、`/root/sdcard`。安装幂等；重新安装保留
 `/root/workspace`（provider home）。`executeShell` 会等待环境就绪（最长 180 秒）。
 
 ## 构建与测试
@@ -78,19 +80,45 @@ Service 声明（与 LineCode `:ipc` 的 AIDL 逐字复制以保持二进制兼�
 在 LineCode 中启用：设置 → 扩展 → 终端提供者 → 扫描并添加本扩展；工具与执行 →
 执行目标 → 终端提供者。签名匹配或已信任的扩展会被客户端自动发现与绑定。
 
+## 外部文件访问
+
+扩展以 API 28 的 legacy external storage 方式申请 `READ_EXTERNAL_STORAGE` /
+`WRITE_EXTERNAL_STORAGE`（manifest 中开启 `requestLegacyExternalStorage`），获得授权后
+把设备主共享存储绑定进 Ubuntu：
+
+| Guest 路径 | Host 路径 | 用途 |
+|---|---|---|
+| `/sdcard` | `/storage/emulated/0` | Android 常用别名 |
+| `/storage/emulated/0` | 同上 | 与 LineCode 项目绝对路径一致 |
+| `/root/sdcard` | 同上 | 从 provider home 直接访问的便捷入口 |
+
+- Shell 与 AIDL 文件接口都使用同一套映射：`executeShell`/后台任务可读写这些路径，
+  `readFile`/`writeFile`/`listDir` 等文件接口同样接受 `/sdcard/...` 与
+  `/storage/emulated/0/...`；
+- 未授权时挂载点保持为空目录，文件接口返回失败，不会回退到 rootfs 以外的未知路径；
+- 共享存储路径同样做边界校验：符号链接若指向该卷之外会被拒绝；
+- 默认工作目录仍是 `/root/workspace`；访问 LineCode 的外部项目时使用其绝对路径
+  （如 `/storage/emulated/0/Projects/foo`）或先 `cd /sdcard/...`。
+
+在状态页的「外部文件访问」区域点击「授权存储访问」授予权限；若系统不再显示授权对话框，
+按钮会变为「打开系统设置」，可在应用详情中手动开启存储权限。授权后无需重启环境，
+下一次命令即生效。
+
 ## 安全模型
 
 - guest 进程以应用 UID 在沙箱内运行；PRoot `-0` 仅为伪 root，不构成特权边界；
 - guest 路径解析与 tar 解压均拒绝 `..` 越界与符号链接逃逸，不会触及 rootfs 之外的宿主文件；
-- 不申请 `MANAGE_EXTERNAL_STORAGE`，不绑定外部存储；`allowBackup=false`，无 launcher 组件；
-- 持有 `IPC_TERMINAL_PROVIDER` 权限的调用方可在 guest 内执行任意命令，该权限只应授予
-  受信任的客户端（信任模型与 LineCode `:ipc` 一致）。
+- 只有在用户授予存储权限后才绑定共享存储；未授权时挂载点为空的 rootfs 目录，
+  AIDL 文件接口不会读写任何外部文件；`allowBackup=false`，无 launcher 组件；
+- 持有 `IPC_TERMINAL_PROVIDER` 权限的调用方可在 guest 内执行任意命令，并在已授权时
+  读写设备共享存储；该权限只应授予受信任的客户端（信任模型与 LineCode `:ipc` 一致）。
 
 ## 排障
 
 - 首次 `executeShell` 返回 `-3`：Ubuntu 仍在解压，等状态页显示就绪后重试；
 - x86_64 模拟器无法运行内置 arm64 PRoot（`Exec format error` 属预期），真机需 arm64；
 - 构建提示缺少运行时资源：执行 `./tools/fetch-runtime.sh`；
+- 共享存储不可用：在状态页「外部文件访问」授权，或到系统设置中开启存储权限；
 - 恢复干净环境：状态页「重新安装」，或 `adb shell pm clear cn.lineai.terminal.extension`；
 - Android 12+ 日志中的 `avc: denied { link }` 属预期：系统禁止在数据目录建硬链接，
   解压器自动退化为复制。

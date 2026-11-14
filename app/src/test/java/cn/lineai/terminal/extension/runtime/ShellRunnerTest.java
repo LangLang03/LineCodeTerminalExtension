@@ -3,6 +3,7 @@ package cn.lineai.terminal.extension.runtime;
 import org.junit.Test;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -42,6 +43,25 @@ public class ShellRunnerTest {
         assertEquals("/root/workspace", command.get(command.indexOf("-w") + 1));
         command = runner().buildCommand("ls", "/tmp/../root");
         assertEquals("/root", command.get(command.indexOf("-w") + 1));
+    }
+
+    @Test
+    public void bindMountsSharedStorageWhenAvailable() throws Exception {
+        File external = Files.createTempDirectory("shell-ext").toFile();
+        ShellRunner runner = new ShellRunner(
+                new RuntimePaths(new File("/tmp/linecode-extension-test")), () -> external);
+        List<String> command = runner.buildCommand("ls", "/root/workspace");
+        String path = external.getAbsolutePath();
+        assertTrue(command.contains(path + ":/sdcard"));
+        assertTrue(command.contains(path + ":/storage/emulated/0"));
+        assertTrue(command.contains(path + ":/root/sdcard"));
+    }
+
+    @Test
+    public void omitsSharedStorageBindsWithoutPermission() {
+        List<String> command = runner().buildCommand("ls", "/root/workspace");
+        assertFalse(command.contains("/sdcard"));
+        assertFalse(command.contains("/storage/emulated/0"));
     }
 
     @Test

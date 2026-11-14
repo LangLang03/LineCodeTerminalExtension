@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * Maps guest Linux paths (the namespace used by LineCode over IPC) onto host
@@ -17,15 +18,59 @@ public final class GuestPaths {
 
     private static final int MAX_SYMLINK_HOPS = 40;
 
+    /** Guest prefixes that resolve to the host shared volume instead of the rootfs. */
+    private static final String[] EXTERNAL_PREFIXES = {
+            ExternalStorage.GUEST_SDCARD,
+            ExternalStorage.GUEST_ANDROID_ROOT,
+            "/storage/self/primary"
+    };
+
     private final File rootfs;
+    private final Supplier<File> externalRoot;
 
     /**
-     * Creates a mapper rooted at the given rootfs directory.
+     * Creates a mapper confined to the rootfs; shared storage is not exposed.
      *
      * @param rootfsDir host directory of the extracted rootfs
      */
     public GuestPaths(File rootfsDir) {
+        this(rootfsDir, null);
+    }
+
+    /**
+     * Creates a mapper that also exposes the host shared volume under {@code /sdcard}
+     * and {@code /storage/emulated/0} while the supplier returns a usable root.
+     *
+     * @param rootfsDir host directory of the extracted rootfs
+     * @param externalRoot supplier of the host shared storage root, or {@code null}
+     */
+    public GuestPaths(File rootfsDir, Supplier<File> externalRoot) {
         this.rootfs = rootfsDir.getAbsoluteFile();
+        this.externalRoot = externalRoot;
+    }
+
+    /**
+     * Returns the host shared storage root when the guest mapping is active.
+     *
+     * @return the external storage root, or {@code null} when unavailable
+     */
+    public File externalRoot() {
+        return externalRoot == null ? null : externalRoot.get();
+    }
+
+    /**
+     * Reports whether a guest path addresses the shared volume rather than the rootfs.
+     *
+     * @param normalized absolute normalized guest path
+     * @return {@code true} when the path starts with a shared-storage prefix
+     */
+    public static boolean isExternalPath(String normalized) {
+        for (String prefix : EXTERNAL_PREFIXES) {
+            if (normalized.equals(prefix) || normalized.startsWith(prefix + "/")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -88,6 +133,10 @@ public final class GuestPaths {
      */
     public File resolve(String guestPath) throws IOException {
         String normalized = normalize(guestPath);
+        File external = externalRoot();
+        if (external != null && isExternalPath(normalized)) {
+            return resolveExternal(external, normalized);
+        }
         ArrayDeque<String> pending = segments(normalized);
         ArrayDeque<String> resolved = new ArrayDeque<>();
         int hops = 0;
@@ -150,7 +199,13 @@ public final class GuestPaths {
         if (!parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
             throw new IOException("Cannot create parent directory: " + guestPath);
         }
-        requireInsideRoot(parent);
+        String normalized = normalize(guestPath);
+        File external = externalRoot();
+        if (external != null && isExternalPath(normalized)) {
+            requireInside(external, parent, guestPath);
+        } else {
+            requireInside(rootfs, parent, guestPath);
+        }
         return target;
     }
 
@@ -163,25 +218,67 @@ public final class GuestPaths {
      */
     public String toGuest(File hostFile) {
         try {
-            File canonicalRoot = rootfs.getCanonicalFile();
-            String rootPath = canonicalRoot.getPath() + File.separator;
-            String canonicalHost = hostFile.getCanonicalFile().getPath();
-            if (!canonicalHost.startsWith(rootPath)) {
-                return null;
+            String externalPath = guestPathIn(externalRoot(), ExternalStorage.GUEST_SDCARD, hostFile);
+            if (externalPath != null) {
+                return externalPath;
             }
-            return "/" + canonicalHost.substring(rootPath.length()).replace(File.separatorChar, '/');
+            return guestPathIn(rootfs, "", hostFile);
         } catch (IOException error) {
             return null;
         }
     }
 
-    /** Rejects paths whose canonical form escapes the rootfs boundary. */
-    private void requireInsideRoot(File file) throws IOException {
-        File canonicalRoot = rootfs.getCanonicalFile();
+    /** Maps a host file below {@code root} to a guest path, or returns null when outside. */
+    private static String guestPathIn(File root, String prefix, File hostFile) throws IOException {
+        if (root == null) {
+            return null;
+        }
+        File canonicalRoot = root.getCanonicalFile();
+        String rootPath = canonicalRoot.getPath() + File.separator;
+        String canonicalHost = hostFile.getCanonicalFile().getPath();
+        if (!canonicalHost.startsWith(rootPath)) {
+            return null;
+        }
+        return prefix + "/" + canonicalHost.substring(rootPath.length())
+                .replace(File.separatorChar, '/');
+    }
+
+    /**
+     * Resolves a shared-storage guest path to the host volume and rejects escapes that
+     * would land outside it (for example a symlink planted on the shared volume).
+     */
+    private static File resolveExternal(File root, String normalized) throws IOException {
+        StringBuilder relative = new StringBuilder();
+        for (String prefix : EXTERNAL_PREFIXES) {
+            if (normalized.equals(prefix)) {
+                return root;
+            }
+            if (normalized.startsWith(prefix + "/")) {
+                relative.append(normalized.substring(prefix.length() + 1));
+                break;
+            }
+        }
+        File target = root;
+        for (String part : segments(relative.toString())) {
+            target = new File(target, part);
+        }
+        File probe = target;
+        while (probe != null && !probe.exists()) {
+            probe = probe.getParentFile();
+        }
+        if (probe != null) {
+            requireInside(root, probe, normalized);
+        }
+        return target;
+    }
+
+    /** Rejects paths whose canonical form escapes the given containment root. */
+    private static void requireInside(File root, File file, String guestPath) throws IOException {
+        File canonicalRoot = root.getCanonicalFile();
         String rootPath = canonicalRoot.getPath() + File.separator;
         String canonicalFile = file.getCanonicalFile().getPath();
-        if (!canonicalFile.startsWith(rootPath)) {
-            throw new IOException("Path escapes the rootfs: " + file);
+        if (!canonicalFile.equals(canonicalRoot.getPath()) && !canonicalFile.startsWith(rootPath)) {
+            throw new IOException("Path escapes its mount: " + guestPath);
         }
     }
 
